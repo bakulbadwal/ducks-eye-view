@@ -1,0 +1,4 @@
+.claude/
+*.tmp
+.DS_Store
+.impeccable/

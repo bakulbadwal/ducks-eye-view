@@ -1,0 +1,1333 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Duck's-Eye View</title>
+<meta name="description" content="A hands-on lab for how a robot sees: follow one camera frame through a real robot duck's vision stack, from pixels and the letterbox to convolution, YOLO's 2,100 boxes, INT8, and turning a box into a head turn.">
+<meta property="og:title" content="Duck's-Eye View: how a robot sees">
+<meta property="og:description" content="Follow one camera frame through a real robot's vision pipeline: letterbox it, convolve it, drown in 2,100 boxes, shrink it to 8 bits, and turn a box into an angle.">
+<meta property="og:image" content="https://bakulbadwal.github.io/ducks-eye-view/docs/hero.png">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='34' r='26' fill='%23E9EEF0' stroke='%234A2E1E' stroke-width='4'/%3E%3Ccircle cx='30' cy='32' r='12' fill='%231B2226' stroke='%234A2E1E' stroke-width='3'/%3E%3Ccircle cx='34' cy='28' r='4' fill='%239FD3D6'/%3E%3Cpath d='M50 30l10 4-10 4z' fill='%23E8923A' stroke='%234A2E1E' stroke-width='3' stroke-linejoin='round'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Andika:wght@400;700&family=Grandstander:wght@700;800&family=Patrick+Hand&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/styles.css?v=202609252257">
+</head>
+<body>
+<!--
+THESIS: A robot sees by pushing one camera frame down a pipeline: pixels, a letterbox, filters, 2,100 guesses, a shredder, an 8-bit squeeze, and a map from pixels to angles. Drawn as a Busytown cutaway of a robot duck's head, where every room and worker wears its label. Sibling of Policy Pond (how the duck learns to walk) and Inference Kitchen.
+OWN-WORLD: flat gouache on paper; warm-brown outlines; lens teal, darkroom plum and duck yellow as whole fields; Grandstander signboards, Patrick Hand labels, Andika body; painted-sign buttons, price-tag readouts, sticky-note predictions, chalkboard takeaways.
+HONESTY: the pipeline math is exact and ported from the real code (letterbox, decode, NMS, IoU, AP, INT8, the pinhole camera, stereo). The room and the detector's scores are toys, labelled as such.
+-->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false"><defs><filter id="gouache" x="-2%" y="-2%" width="104%" height="104%"><feTurbulence type="fractalNoise" baseFrequency=".045" numOctaves="2" seed="3" result="w"/><feDisplacementMap in="SourceGraphic" in2="w" scale="1.3" xChannelSelector="R" yChannelSelector="G"/></filter></defs></svg>
+<div class="wrap">
+<header>
+  <div class="mast"><b>Duck's-Eye View</b><span>a hands-on lab</span></div>
+  <div><h1>How a robot sees</h1>
+  <p class="sub">Follow one camera frame through a real robot duck's vision stack: turn it, letterbox it, slide filters over it, drown in 2,100 guesses, shred the duplicates, squeeze it into 8 bits, and turn the box that survives into a head turn. Every robot number comes from its own code, and every toy is labelled as one. About 90 minutes of play.</p></div>
+</header>
+
+<nav id="nav" aria-label="Steps"></nav>
+
+<section id="s0" data-title="One Look">
+<style>
+#s0 .s0map{width:100%;height:200px;touch-action:none;cursor:crosshair;background:#FFF6DC}
+#s0 .s0map:focus-visible{outline:3px solid var(--sky-d);outline-offset:2px}
+#s0 .s0bench{display:flex;flex-wrap:wrap;gap:12px 14px;align-items:flex-start;margin-top:12px}
+#s0 .s0cell{flex:0 1 auto;min-width:0;opacity:.3;transition:opacity .35s;max-width:100%}
+#s0 .s0cell.show{opacity:1}
+#s0 .s0cell .frame{display:inline-block;vertical-align:top;max-width:100%}
+#s0 .s0cell .frame canvas{width:auto;height:190px;display:block;border:0;border-radius:0;background:transparent;max-width:100%}
+#s0 .s0cell .frame .ov{position:absolute;inset:0;width:100%;height:100%}
+#s0 .s0cell .cap{font:400 14.5px/1.3 var(--hand);color:var(--soft);margin-top:5px;text-align:center}
+#s0 .s0cell .cap b{color:var(--ink);font:700 15px var(--sign)}
+#s0 .s0head{width:190px;height:190px;display:block;background:#FFF6DC;border:2.5px solid var(--line);border-radius:8px;box-shadow:var(--lift)}
+#s0 .s0turn{transition:transform .5s cubic-bezier(.2,.8,.2,1);transform-box:fill-box;transform-origin:50% 62%}
+#s0 .pipe .st .num{display:block;font:800 19px/1.2 var(--sign);color:var(--brick-d);margin-top:2px;font-variant-numeric:tabular-nums}
+#s0 .pipe .st.done{background:#E7F3DE}
+#s0 .s0therm{width:100%;max-width:110px;height:auto;display:block;margin:0 auto}
+#s0 .s0tlrow{display:grid;grid-template-columns:minmax(0,1fr) 120px;gap:12px;align-items:center}
+@media(max-width:600px){#s0 .s0tlrow{grid-template-columns:minmax(0,1fr)}#s0 .s0cell .frame canvas{height:140px}#s0 .s0head{width:140px;height:140px}}
+#s0 .s0oldbar{display:flex;height:30px;border:2px solid var(--line);border-radius:6px;overflow:hidden;font:700 14px/26px var(--sign);color:var(--ink);margin:8px 0 4px}
+#s0 .s0oldbar i{display:block;font-style:normal;text-align:center;white-space:nowrap;overflow:hidden;min-width:0}
+#s0 .s0oldbar .a{background:#F4B7A7}#s0 .s0oldbar .b{background:#BFE3A6}#s0 .s0oldbar .c{background:#FFF1A8}
+#s0 .s0pp{font:400 15px/1.35 var(--hand);color:var(--soft)}
+</style>
+  <div class="card">
+    <div class="scene" data-art="s0"></div>
+    <h2>0 · One look: the whole trip, one frame</h2>
+    <p class="lede">A robot doesn't "see". It pushes one camera <span class="g" data-g="frame">frame</span> down a <span class="g" data-g="pipeline">pipeline</span> and gets back a number it can act on. This lab follows one frame through <b>Microduck</b>, a 25 cm open-source robot duck whose head camera finds <i>other</i> Microducks and turns the head toward them. Its head is drawn as a two-storey workshop staffed by ducklings in hard hats: every room is one step of this lab. Every robot number on these pages comes from the robot's own code, and every toy is labelled as one. Every term with a wavy red underline is tappable.</p>
+    <div class="kmap">
+      <div><span class="k" data-i="eye" aria-hidden="true"></span><b>Eye window</b> = the camera<br><span class="t">an IMX219, streaming 1280×720 (step 1)</span></div>
+      <div><span class="k" data-i="dark" aria-hidden="true"></span><b>Darkroom</b> = <span class="g" data-g="preprocess">pre-processing</span><br><span class="t">turn it, mount it on a grey card (step 1)</span></div>
+      <div><span class="k" data-i="stencil" aria-hidden="true"></span><b>Stencil room</b> = the <span class="g" data-g="cnn">CNN</span><br><span class="t">stencils slid over the print (step 2)</span></div>
+      <div><span class="k" data-i="boxdesk" aria-hidden="true"></span><b>Box desk</b> = the detection head<br><span class="t">2,100 pigeonholes, one sticky note each (step 3)</span></div>
+      <div><span class="k" data-i="shred" aria-hidden="true"></span><b>Shredder clerk</b> = <span class="g" data-g="nms">NMS</span><br><span class="t">twenty notes on one duck become one (step 3)</span></div>
+      <div><span class="k" data-i="ruler" aria-hidden="true"></span><b>Tiny ruler</b> = <span class="g" data-g="int8">INT8</span><br><span class="t">only 256 notches; the thermometer and fan live here too (step 4)</span></div>
+      <div><span class="k" data-i="maproom" aria-hidden="true"></span><b>Map room</b> = geometry<br><span class="t">pinhole string, protractor, <span class="g" data-g="intrinsics">intrinsics</span> (steps 5–6)</span></div>
+      <div><span class="k" data-i="crank" aria-hidden="true"></span><b>Neck crank</b> = the <span class="g" data-g="headturn">head turn</span><br><span class="t">a <span class="g" data-g="bearing">bearing</span> becomes an angle</span></div>
+      <div><span class="k" data-i="engine" aria-hidden="true"></span><b>Engine room</b> = the walking policy<br><span class="t">runs on <span class="g" data-g="proprio">proprioception</span>; never looks at a photo</span></div>
+    </div>
+    <p class="covers">Covers <b>HF CV Course, Unit 0–1 overview</b>: what the course is for, and the shape of a perception pipeline · study guide <code>00-perception-spine.md</code></p>
+  </div>
+
+  <div class="card">
+    <h3>Take one look</h3>
+    <p class="lede">Put another Microduck somewhere in the room (drag it on the map, or use the sliders), then press <b>Take one look</b> and watch one frame travel through every room. Everything shown is computed live: the frame, the turn, the letterbox, the 2,100 candidates, the clean-up, the bearing, the angle.</p>
+    <div class="callout co-w"><b>Teaching model.</b> The room is a painted toy and the scores come from a stand-in for the real network, built to fill the real output layout (2,100 candidates, three grids) and to behave the way the robot's code warns. The letterbox, the clean-up (decode and NMS) and the bearing are exact ports of the robot's code. Turning the bearing into an angle is standard pinhole math with our inferred field of view; the robot's own intrinsics are still placeholders (<a class="src" href="https://github.com/pollen-robotics/microduck/blob/590b986/docs/ideas/autonomous_behavior.md" target="_blank" rel="noopener">docs/ideas/autonomous_behavior.md:88</a>).</div>
+    <div class="pg">
+      <div class="panel">
+        <div class="lbl">Top-down map (drag the duck; the wedge is what the camera can see)</div>
+        <canvas id="s0map" class="s0map" height="200" tabindex="0" role="application" aria-label="Top-down map of the room. Drag the duck, or use the arrow keys."></canvas>
+        <div class="sl"><div class="sl-h"><span>Duck: metres across (− left, + right)</span><b id="s0xv"></b></div><input type="range" id="s0x" min="-2" max="2" step="0.05" value="0.6" aria-label="Duck position across, in metres"></div>
+        <div class="sl"><div class="sl-h"><span>Duck: metres ahead</span><b id="s0zv"></b></div><input type="range" id="s0z" min="0.6" max="4.5" step="0.05" value="3" aria-label="Duck distance ahead, in metres"></div>
+        <label class="tg"><input type="checkbox" id="s0rub"><span class="sw"></span><span>Add a rubber duck (a <span class="g" data-g="hardneg">hard negative</span>)</span></label>
+        <div class="btnrow"><button class="act" id="s0go">Take one look</button><button class="ghost" id="s0again">Look again ↻</button></div>
+        <div class="lbl" id="s0note">Each press is a fresh frame: new sensor noise, same room.</div>
+      </div>
+      <div>
+        <div class="pipe" id="s0pipe" aria-live="polite">
+          <div class="st" data-st="0"><b>Eye window</b>1280×720 streamed<span class="num" id="s0n0">–</span></div>
+          <div class="st" data-st="1"><b>Darkroom: turn</b>a quarter turn<span class="num" id="s0n1">–</span></div>
+          <div class="st" data-st="2"><b>Darkroom: mount</b>grey-114 card<span class="num" id="s0n2">–</span></div>
+          <div class="st" data-st="3"><b>Stencil room</b>yolo11n, one class<span class="num" id="s0n3">–</span></div>
+          <div class="st" data-st="4"><b>Box desk</b>notes posted<span class="num" id="s0n4">–</span></div>
+          <div class="st" data-st="5"><b>Shredder clerk</b>the shredder keeps<span class="num" id="s0n5">–</span></div>
+          <div class="st" data-st="6"><b>Map room</b>bearing −1…+1<span class="num" id="s0n6">–</span></div>
+          <div class="st" data-st="7"><b>Neck crank</b>head turn<span class="num" id="s0n7">–</span></div>
+        </div>
+        <div class="s0bench">
+          <div class="s0cell" data-cell="0"><div class="frame"><canvas id="s0c0" width="640" height="360" aria-label="The frame as streamed, 1280 by 720 landscape"></canvas></div><div class="cap"><b>as streamed</b> · 1280×720, on its side</div></div>
+          <div class="s0cell" data-cell="1"><div class="frame"><canvas id="s0c1" width="360" height="640" aria-label="The upright frame, 720 by 1280"></canvas><canvas id="s0o1" class="ov" width="360" height="640" aria-hidden="true"></canvas></div><div class="cap"><b>upright</b> · 720×1280</div></div>
+          <div class="s0cell" data-cell="2"><div class="frame"><canvas id="s0c2" class="px" width="320" height="320" aria-label="The 320 by 320 model input"></canvas><canvas id="s0o2" class="ov" width="320" height="320" aria-hidden="true"></canvas></div><div class="cap"><b>the input</b> · 320×320, grey where there's no picture</div></div>
+          <div class="s0cell" data-cell="3"><svg class="s0head" viewBox="0 0 200 200" role="img" aria-label="Top view of the head turning toward the duck"><g class="s0turn" id="s0turn"><path id="s0wedge" d="M100 124 L20 30 A122 122 0 0 1 180 30 Z" fill="#9FD3D6" opacity=".45" stroke="#1F6F74" stroke-width="1.5" stroke-dasharray="4 3"/><circle cx="100" cy="124" r="34" fill="#E9EEF0" stroke="#4A2E1E" stroke-width="2.5"/><path d="M88 92 L100 66 L112 92 Z" fill="#E8923A" stroke="#4A2E1E" stroke-width="2.5" stroke-linejoin="round"/><circle cx="100" cy="102" r="7" fill="#1F6F74" stroke="#4A2E1E" stroke-width="2"/><circle cx="102" cy="100" r="2" fill="#9FD3D6"/></g><g id="s0dots"></g><text id="s0angtxt" x="100" y="188" text-anchor="middle" font-family="Grandstander, Patrick Hand, sans-serif" font-weight="800" font-size="17" fill="#4A2E1E"></text></svg><div class="cap"><b>the head turns</b> · toward the box it kept</div></div>
+        </div>
+        <div class="mathbox" id="s0math"><div class="eq">bearing = (box centre x ÷ 720) · 2 − 1 &nbsp;·&nbsp; angle = atan(bearing · tan(FOV<sub>LR</sub> ÷ 2))</div><div class="eqn">Press <b>Take one look</b> to see one frame worked through.</div></div>
+        <div class="callout co-i" id="s0onrobot"></div>
+      </div>
+    </div>
+    <div class="predict" data-p="s0a">
+      <div class="tag">Guess first!</div>
+      <div class="q">There's one duck in the room. Before any clean-up, how many boxes does the detector's head hand back?</div>
+      <div class="opts"><button>1</button><button>About 20</button><button data-right>2,100</button></div>
+      <div class="why">All <b>2,100</b>. Every pigeonhole posts a note whether or not it saw anything; only the <span class="g" data-g="score">score</span> tells them apart. On a duck at 3 m, a dozen or two clear the 0.35 threshold (the robot's code says “twenty”), and the shredder clerk keeps one. Take a look and read the box desk and shredder stations.</div>
+    </div>
+    <div class="predict" data-p="s0b">
+      <div class="tag">Guess first!</div>
+      <div class="q">Does Microduck's <i>walking</i> policy use the camera?</div>
+      <div class="opts"><button>Yes, at 2 looks per second</button><button>Only when a duck is in view</button><button data-right>No, never</button></div>
+      <div class="why"><b>Never.</b> The walking policy's observations are proprioceptive: joint positions and speeds, the IMU, gravity. It never sees a photo. Vision is a behaviour-level sense ("where's the other duck, so I can look at it"), which is why it can afford to be slow. That policy is the subject of <a href="https://bakulbadwal.github.io/policy-pond/" target="_blank" rel="noopener">Policy Pond</a>.</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>The time budget: one second in the head</h3>
+    <p class="lede">The legs tick 50 times a second. The eye looks twice. Slide the looks-per-second dial and watch the board heat up; then switch the darkroom back to the way it used to work, when converting the whole frame before shrinking it ate 345 of the 407 ms a <span class="g" data-g="look">look</span> took.</p>
+    <div class="pg">
+      <div class="panel">
+        <div class="sl"><div class="sl-h"><span>Looks per second</span><b id="s0hzv"></b></div><input type="range" id="s0hz" min="1" max="17" step="1" value="2" aria-label="Detector looks per second"></div>
+        <div class="lbl">Darkroom</div>
+        <div class="seg" id="s0pre"></div>
+        <div class="s0pp" id="s0ppnote"></div>
+        <div class="callout co-w" style="margin-top:12px"><b>Teaching model.</b> The temperature curve is a toy anchored at two real numbers: about 60 ms of work per look at 2 looks a second by design, and 95 °C flat out. Everything between is drawn, not measured.</div>
+      </div>
+      <div>
+        <div class="s0tlrow">
+          <div><canvas id="s0tl" height="170" aria-label="One second: 50 walking ticks and the detector's looks"></canvas>
+          <div class="chartcap"><span class="sw" style="background:#5FA03C"></span>walking loop, 50 <span class="g" data-g="tick">ticks</span> of 20 ms · <span class="sw" style="background:#1F6F74"></span>a look: inference + decode, p50 25.7 ms, p95 58.4 ms · <span class="sw" style="background:#F4B7A7"></span>old darkroom: convert then shrink</div></div>
+          <svg class="s0therm" viewBox="0 0 110 170" role="img" aria-label="Board temperature"><rect x="44" y="12" width="22" height="112" rx="11" fill="#FFFDF6" stroke="#4A2E1E" stroke-width="2.5"/><rect id="s0merc" x="50" y="100" width="10" height="20" rx="5" fill="#C8452F"/><circle cx="55" cy="136" r="18" fill="#C8452F" stroke="#4A2E1E" stroke-width="2.5"/><path d="M70 40h6M70 68h6M70 96h6" stroke="#4A2E1E" stroke-width="2"/><text x="80" y="44" font-family="Patrick Hand, sans-serif" font-size="12" fill="#4A2E1E">95°</text><text x="80" y="72" font-family="Patrick Hand, sans-serif" font-size="12" fill="#4A2E1E">75°</text><text x="80" y="100" font-family="Patrick Hand, sans-serif" font-size="12" fill="#4A2E1E">55°</text><g id="s0fan" transform="translate(20 30)"><circle r="13" fill="#B9BDC2" stroke="#4A2E1E" stroke-width="2"/><path d="M0 0v-10M0 0l9 5M0 0l-9 5" stroke="#4A2E1E" stroke-width="3" stroke-linecap="round"/><circle r="2.5" fill="#4A2E1E"/></g><text id="s0tempt" x="55" y="166" text-anchor="middle" font-family="Grandstander, Patrick Hand, sans-serif" font-weight="800" font-size="15" fill="#4A2E1E"></text></svg>
+        </div>
+        <div class="grid g3" style="margin-top:10px">
+          <div class="stat"><div class="v" id="s0busy"></div><div class="l">of each second spent looking</div></div>
+          <div class="stat"><div class="v acc" id="s0gap"></div><div class="l">walking ticks between looks</div></div>
+          <div class="stat"><div class="v" id="s0tempv"></div><div class="l">board temperature (toy curve)</div></div>
+        </div>
+        <div class="callout" id="s0thermnote"></div>
+        <h3>Why a look used to cost 407 ms</h3>
+        <div class="s0oldbar" id="s0oldbar" role="img" aria-label="Old look: 345 ms converting and shrinking, 62 ms for the rest"></div>
+        <div class="s0pp">The old darkroom converted all <b>921,600</b> pixels of the 1280×720 frame to RGB, then shrank them to 320×320 and threw <b>89%</b> away. The fix fills only the model's <b>102,400</b> input pixels (57,600 of them sampled from the picture, the rest grey card), straight from the camera's format. The code calls it <b>nine times</b> less arithmetic for the same answer, and it's nearest-neighbour on purpose (step 1).</div>
+        <div class="callout co-i" id="s0budgetrobot"></div>
+      </div>
+    </div>
+    <div class="predict" data-p="s0c">
+      <div class="tag">Guess first!</div>
+      <div class="q">At 2 looks per second, how many walking ticks go by between one look and the next?</div>
+      <div class="opts"><button>2</button><button data-right>25</button><button>50</button></div>
+      <div class="why"><b>25.</b> Half a second between looks, 20 ms per tick: 500 ÷ 20 = 25 steps of walking per glance. The legs can't wait for the eyes, which is why the walking policy runs on its own senses and vision only steers the behaviour above it.</div>
+    </div>
+    <div class="say" data-say="s0">
+      <div class="tag">Say it out loud</div>
+      <div class="line">One frame goes in, gets turned and mounted on a grey card, is read by stencils, comes back as 2,100 sticky notes, gets shredded down to one box, and that box becomes a bearing and a head turn. It happens twice a second, and the legs never wait for it.</div>
+    </div>
+  </div>
+</section>
+<section id="s1" data-title="The Darkroom">
+<style>
+#s1 .frame canvas{border:0;border-radius:0;background:transparent}
+#s1 .s1stack{grid-template-columns:1fr;gap:8px}
+#s1 .s1stack .stat{padding:18px 8px 8px}
+@media(max-width:840px){#s1 .s1stack{grid-template-columns:repeat(3,1fr)}}
+@media(max-width:480px){#s1 .s1stack{grid-template-columns:1fr}}
+#s1 .s1probe{cursor:crosshair;touch-action:none;max-width:300px;margin:0 auto}
+#s1 .s1probe:focus-visible{outline:3px solid var(--sky-d);outline-offset:2px}
+#s1 .s1pxgrid{display:grid;grid-template-columns:176px minmax(0,1fr);gap:14px;align-items:start;margin-top:10px}
+@media(max-width:600px){#s1 .s1pxgrid{grid-template-columns:1fr}}
+#s1 .s1loupe{width:176px;height:176px;display:block;border:2.5px solid var(--line);border-radius:8px;background:var(--sheet)}
+#s1 .s1rgb{display:flex;gap:8px;align-items:flex-end;height:96px;margin:26px 0 6px;padding:0 4px}
+#s1 .s1rgb div{flex:1;border:2px solid var(--line);border-radius:6px 6px 0 0;position:relative;min-height:3px}
+#s1 .s1rgb div span{position:absolute;top:-24px;left:0;right:0;text-align:center;font:700 16px var(--sign);color:var(--ink)}
+#s1 .s1read{font:400 16px/1.45 var(--hand);color:var(--soft)}
+#s1 .s1read b{font:700 18px var(--sign);color:var(--ink)}
+#s1 .s1mount{display:flex;flex-wrap:wrap;gap:12px 14px;align-items:flex-start;margin-top:8px}
+#s1 .s1mount .cell{flex:0 1 auto;max-width:100%;text-align:center;min-width:0}
+#s1 .s1mount .frame{display:inline-block;max-width:100%}
+#s1 .s1mount .frame canvas{height:200px;width:auto;max-width:100%;display:block}
+#s1 .s1mount .frame .ov{width:100%;height:100%}
+#s1 .s1mount .cap{font:400 14.5px/1.3 var(--hand);color:var(--soft);margin-top:5px}
+#s1 .s1mount .cap b{color:var(--ink);font:700 15px var(--sign)}
+@media(max-width:600px){#s1 .s1mount .frame canvas{height:150px}}
+#s1 .s1qgrid{display:grid;grid-template-columns:minmax(0,260px) minmax(0,1fr);gap:14px;align-items:start}
+@media(max-width:700px){#s1 .s1qgrid{grid-template-columns:1fr}}
+#s1 .s1qgrid .frame canvas{width:100%;height:auto}
+#s1 .s1crops{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;align-items:start;margin-top:8px}
+@media(max-width:600px){#s1 .s1crops{grid-template-columns:1fr 1fr}#s1 .s1crops .thumb{grid-column:1/-1;max-width:260px;margin:0 auto}}
+#s1 .s1crops .frame canvas{width:100%;height:auto}
+#s1 .s1crops .cap{font:400 14.5px/1.3 var(--hand);color:var(--soft);margin-top:5px;text-align:center}
+#s1 .s1crops .cap b{color:var(--ink);font:700 15px var(--sign)}
+#s1 .s1thumb{cursor:crosshair;touch-action:none}
+#s1 .s1mbgrid{display:grid;grid-template-columns:200px minmax(0,1fr);gap:14px;align-items:start}
+@media(max-width:600px){#s1 .s1mbgrid{grid-template-columns:1fr}}
+#s1 .s1mbgrid .frame canvas{width:100%;height:auto}
+#s1 .s1in{display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin:8px 0}
+#s1 .s1in label{font:400 15px var(--hand);color:var(--soft);display:block}
+#s1 .s1in input[type=number]{width:84px}
+#s1 .s1fb{margin-top:8px;font:400 16.5px/1.4 var(--hand)}
+#s1 .s1fb .ok{color:var(--grass-d)}#s1 .s1fb .bad{color:var(--brick-d)}
+#s1 .s1prog{font:400 15px var(--hand);color:var(--soft);margin-left:6px}
+</style>
+  <div class="card">
+    <div class="scene" data-art="s1"></div>
+    <h2>1 · The darkroom: what a camera hands you, and the mat it goes on</h2>
+    <p class="lede">A camera doesn't hand the robot a picture. It hands it <b>2,764,800 numbers</b>: a grid 1280 wide by 720 tall, lying on its side, with three numbers per cell for red, green and blue, each 0–255. The darkroom's job is to make that grid look <i>exactly</i> like the ones the detector was trained on: turn it upright, shrink it by one factor onto a square grey card, keep the colour order. Nothing in here is clever. Everything in here is a contract, and breaking it doesn't crash anything, which is the problem.</p>
+    <div class="kmap">
+      <div><span class="k" data-i="film" aria-hidden="true"></span><b>The print</b> = the <span class="g" data-g="frame">frame</span><br><span class="t">an <span class="g" data-g="hwc">H × W × 3</span> array of <span class="g" data-g="uint8">uint8</span></span></div>
+      <div><span class="k" data-i="turn" aria-hidden="true"></span><b>The quarter turn</b> = orientation<br><span class="t">1280×720 as streamed → 720×1280 upright</span></div>
+      <div><span class="k" data-i="card" aria-hidden="true"></span><b>The grey card</b> = the <span class="g" data-g="letterbox">letterbox</span><br><span class="t">one scale, <span class="g" data-g="pad114">114-grey</span> bars where there's no picture</span></div>
+      <div><span class="k" data-i="rgb" aria-hidden="true"></span><b>The wall sign</b> = <span class="g" data-g="rgbbgr">RGB, not BGR</span><br><span class="t">the channel order the model saw</span></div>
+      <div><span class="k" data-i="cut" aria-hidden="true"></span><b>The guillotine</b> = <span class="g" data-g="stretchfit">stretching</span>, forbidden<br><span class="t">two scales make a duck 1.78× too wide</span></div>
+    </div>
+    <p class="covers">Covers <b>HF CV Course, Unit 1</b>: image as a function and an array, imaging, pre-processing (resize, pad, channel order, normalise) · study guide <code>U1-fundamentals.md</code></p>
+  </div>
+
+  <div class="card">
+    <h3>Pixels are numbers</h3>
+    <p class="lede">Hover or tap anywhere on the frame (arrow keys nudge by a pixel). The loupe shows the 11×11 pixels around your finger, and the readout shows what the computer actually has there: three whole numbers, and the position they live at in the array.</p>
+    <div class="pg">
+      <div class="panel">
+        <div class="sl"><div class="sl-h"><span>Duck: metres across (− left, + right)</span><b id="s1xv"></b></div><input type="range" id="s1x" min="-1.2" max="1.2" step="0.05" value="0.3" aria-label="Duck position across, in metres"></div>
+        <div class="sl"><div class="sl-h"><span>Duck: metres ahead</span><b id="s1zv"></b></div><input type="range" id="s1z" min="0.8" max="4" step="0.05" value="2" aria-label="Duck distance ahead, in metres"></div>
+        <div class="lbl">Show</div>
+        <div class="seg" id="s1ch"></div>
+        <div class="grid s1stack" style="margin-top:6px">
+          <div class="stat"><div class="v">2,764,800</div><div class="l">numbers: 1280 × 720 × 3</div></div>
+          <div class="stat"><div class="v acc">2.76 MB</div><div class="l">as uint8, one byte each</div></div>
+          <div class="stat"><div class="v">11.06 MB</div><div class="l">as float32, once it's ÷ 255</div></div>
+        </div>
+        <div class="callout co-w" style="margin-top:10px"><b>Teaching model.</b> The room is painted, not photographed, so its pixels are cleaner than a real IMX219's. The array shape, the turn and the byte arithmetic are the robot's.</div>
+      </div>
+      <div>
+        <div class="frame s1probe" id="s1pf" tabindex="0" role="application" aria-label="The camera frame. Move over it to read a pixel; arrow keys nudge the probe."><canvas id="s1f" width="360" height="640" aria-hidden="true"></canvas><canvas id="s1fo" class="ov" width="360" height="640" aria-hidden="true"></canvas></div>
+        <div class="s1pxgrid">
+          <div><canvas id="s1lp" class="s1loupe px" width="88" height="88" aria-label="Loupe: the 11 by 11 pixels around the probe"></canvas><div class="chartcap" style="text-align:center">11 × 11 pixels, ×16</div></div>
+          <div>
+            <div class="s1read" id="s1read"></div>
+            <div class="s1rgb" id="s1bars" aria-hidden="true"><div style="background:#C8452F"><span></span></div><div style="background:#5FA03C"><span></span></div><div style="background:#246A9C"><span></span></div></div>
+            <div class="mathbox" id="s1pxmath"></div>
+          </div>
+        </div>
+        <div class="callout co-i" id="s1pxrobot"></div>
+      </div>
+    </div>
+    <div class="predict" data-p="s1c">
+      <div class="tag">Guess first!</div>
+      <div class="q">The bytes are the same, but a library reads them as BGR instead of RGB. What does the detector do?</div>
+      <div class="opts"><button>Throws a colour-format error</button><button data-right>Runs normally, scores worse</button><button>Nothing changes: shape is what matters</button></div>
+      <div class="why"><b>Runs normally, scores worse.</b> The array has the same shape and type, so nothing checks it. Red and blue are swapped, the model has never seen a duck in those colours, and every score drifts down. The "Quietly worse" bench below measures it.</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>The mount: turn it, then fit it on a square card</h3>
+    <p class="lede">The sensor streams 1280×720 on its side. The darkroom turns it a quarter turn clockwise, then fits the 720×1280 print into the model's 320×320 square. Two ways to do that: <b>letterbox</b> (one scale for both axes, grey where the picture runs out) or <b>stretch</b> (a scale per axis, no grey, ducks squashed). The model was trained on the first.</p>
+    <div class="s1mount">
+      <div class="cell"><div class="frame"><canvas id="s1m0" width="640" height="360" aria-label="As streamed: 1280 by 720"></canvas></div><div class="cap"><b>as streamed</b> · 1280×720</div></div>
+      <div class="cell"><div class="frame"><canvas id="s1m1" width="360" height="640" aria-label="Upright: 720 by 1280"></canvas></div><div class="cap"><b>quarter turn</b> · 720×1280</div></div>
+      <div class="cell"><div class="frame"><canvas id="s1m2" class="px" width="320" height="320" aria-label="Letterboxed 320 by 320 input"></canvas><canvas id="s1m2o" class="ov" width="320" height="320" aria-hidden="true"></canvas></div><div class="cap"><b>letterbox</b> · ×0.25 → 180×320, pad 70</div></div>
+      <div class="cell"><div class="frame"><canvas id="s1m3" class="px" width="320" height="320" aria-label="Stretched 320 by 320 input"></canvas><canvas id="s1m3o" class="ov" width="320" height="320" aria-hidden="true"></canvas></div><div class="cap"><b>stretch</b> · ×0.444 across, ×0.25 down</div></div>
+    </div>
+    <label class="tg"><input type="checkbox" id="s1shade" checked><span class="sw"></span><span>Shade the grey, and draw the duck's box on both</span></label>
+    <div class="grid g3">
+      <div class="stat"><div class="v" id="s1lbfit"></div><div class="l">letterbox: scale, fitted size, side pads</div></div>
+      <div class="stat"><div class="v acc" id="s1grey"></div><div class="l">of the 320² input is grey card</div></div>
+      <div class="stat"><div class="v bad" id="s1stretch"></div><div class="l">stretch: the duck comes out this much too wide</div></div>
+    </div>
+    <div class="grid g2" style="margin-top:10px">
+      <div class="stat"><div class="v good" id="s1boxlb"></div><div class="l">duck box in the letterboxed input (w × h px)</div></div>
+      <div class="stat"><div class="v bad" id="s1boxst"></div><div class="l">the same duck in the stretched input</div></div>
+    </div>
+    <div class="mathbox" id="s1lbmath"></div>
+    <div class="callout co-i" id="s1mountrobot"></div>
+    <div class="predict" data-p="s1a">
+      <div class="tag">Guess first!</div>
+      <div class="q">What fraction of the 320×320 square is actually picture?</div>
+      <div class="opts"><button>100%: the frame is resized to fill it</button><button>25%: the scale is 0.25</button><button data-right>56.25%</button></div>
+      <div class="why"><b>56.25%.</b> 720×1280 shrunk by 0.25 is 180×320: it fills the height and only 180 of the 320 columns. 180 ÷ 320 = 56.25% picture, 43.75% grey card. Nearly half of what the detector looks at is a flat grey it learned to ignore.</div>
+    </div>
+    <div class="predict" data-p="s1b">
+      <div class="tag">Guess first!</div>
+      <div class="q">Someone swaps the letterbox for a stretch to 320×320. What happens when the robot runs?</div>
+      <div class="opts"><button>It refuses the input</button><button data-right>It runs; the boxes just get worse</button><button>Identical results, no grey to waste</button></div>
+      <div class="why"><b>It runs, worse.</b> 320×320×3 is still 320×320×3, so nothing complains. But every duck is now 1.78× wider than anything the model trained on, and the scores drift down. Try it on the bench below and watch the held-out score.</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Quietly worse</h3>
+    <p class="lede">The contract has three clauses: grey <b>114</b>, <b>RGB</b>, <b>letterbox</b>. Break any of them below. Nothing errors. The preview still looks like a picture. The detector still returns boxes. Only the score moves, and you'd never see it without a held-out test set.</p>
+    <div class="callout co-i" id="s1quiet"></div>
+    <div class="pg">
+      <div class="panel">
+        <div class="sl"><div class="sl-h"><span>Pad colour (grey level)</span><b id="s1padv"></b></div><input type="range" id="s1pad" min="0" max="255" step="1" value="114" aria-label="Letterbox pad grey level"></div>
+        <div class="lbl">Channel order</div><div class="seg" id="s1chan"></div>
+        <div class="lbl">Fit</div><div class="seg" id="s1fit"></div>
+        <div class="btnrow"><button class="ghost" id="s1reset">Back to the contract</button></div>
+        <div class="callout co-w"><b>Teaching model.</b> The toy detector docks a fixed amount for each broken clause (BGR most, then stretch, then any pad but 114), so every wrong grey costs the same here. The <i>direction</i> is the robot code's warning; the sizes are ours. The held-out set is 40 synthetic frames with 35 ducks, and the clean 0.979 is a toy number, not the real model's 0.976.</div>
+      </div>
+      <div class="s1qgrid">
+        <div><div class="frame"><canvas id="s1q" class="px" width="320" height="320" aria-label="The model input with your pre-processing"></canvas></div><div class="chartcap" style="text-align:center">what the model is handed</div></div>
+        <div>
+          <div class="grid g2">
+            <div class="stat big"><div class="v" id="s1best"></div><div class="l">best score on the duck in this frame</div></div>
+            <div class="stat big"><div class="v" id="s1ap"></div><div class="l"><span class="g" data-g="map">AP50</span> on 40 held-out frames</div></div>
+          </div>
+          <div class="chiprow" style="margin-top:10px"><span class="chip good">ran fine · no error</span><span class="chip" id="s1drop"></span></div>
+          <div class="callout" id="s1verdict"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Nearest or bilinear? The robot picks the cheap one</h3>
+    <p class="lede">Shrinking 720×1280 to 180×320 means every input pixel stands for a 4×4 block of the frame. <span class="g" data-g="nearest">Nearest-neighbour</span> copies one pixel from the block. <span class="g" data-g="bilinear">Bilinear</span> blends the four around the sample point. Drag the square on the thumbnail to compare the same 40×40 patch both ways.</p>
+    <div class="s1crops">
+      <div class="thumb"><div class="frame s1thumb" id="s1tf"><canvas id="s1t" class="px" width="320" height="320" aria-label="The letterboxed input; drag to choose a patch"></canvas><canvas id="s1to" class="ov" width="320" height="320" aria-hidden="true"></canvas></div><div class="cap"><b>the 320 input</b> · drag the square</div></div>
+      <div><div class="frame"><canvas id="s1cn" class="px" width="40" height="40" aria-label="The patch, nearest-neighbour"></canvas></div><div class="cap"><b>nearest</b> · 1 read per pixel · what the robot does</div></div>
+      <div><div class="frame"><canvas id="s1cb" class="px" width="40" height="40" aria-label="The patch, bilinear"></canvas></div><div class="cap"><b>bilinear</b> · 4 reads + 3 blends per pixel</div></div>
+    </div>
+    <div class="grid g3" style="margin-top:10px">
+      <div class="stat"><div class="v" id="s1diff"></div><div class="l">average difference per channel, this patch (of 255)</div></div>
+      <div class="stat"><div class="v acc">3×</div><div class="l">the cost of bilinear, per the robot's code</div></div>
+      <div class="stat"><div class="v">≈ 1 px</div><div class="l">of box position, what bilinear would buy</div></div>
+    </div>
+    <div class="callout co-i" id="s1nnrobot"></div>
+    <div class="predict" data-p="s1d">
+      <div class="tag">Guess first!</div>
+      <div class="q">Shrinking a blurry room photo by 4×, beside a 50 Hz control loop. Which resize does the robot use?</div>
+      <div class="opts"><button>Bilinear: image quality first</button><button data-right>Nearest: a third of the cost, a pixel of box at stake</button><button>Neither: it feeds the model the full frame</button></div>
+      <div class="why"><b>Nearest.</b> The code says so and says why: bilinear "costs three times as much to move a box by a pixel", on an input that is a blurred photograph being downscaled by four. Accuracy for speed, chosen on purpose, and reversible if a measurement ever says otherwise.</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Challenge: map it back</h3>
+    <p class="lede">The detector answers in <b>input</b> pixels (the 320 square). The robot needs <b>frame</b> pixels (720×1280) to compute a bearing. Undo the mount: subtract the side pad, divide by the scale. Type the frame box for the highlighted input box.</p>
+    <div class="s1mbgrid">
+      <div><div class="frame"><canvas id="s1mbc" class="px" width="320" height="320" aria-label="The input with the box to map back"></canvas><canvas id="s1mbo" class="ov" width="320" height="320" aria-hidden="true"></canvas></div><div class="chartcap" style="text-align:center" id="s1mbcap"></div></div>
+      <div>
+        <div class="mathbox"><div class="eq">x<sub>frame</sub> = (x<sub>in</sub> − pad<sub>x</sub>) ÷ scale &nbsp;·&nbsp; y<sub>frame</sub> = (y<sub>in</sub> − pad<sub>y</sub>) ÷ scale</div><div class="eqn">with scale = <b>0.25</b>, pad<sub>x</sub> = <b>70</b>, pad<sub>y</sub> = <b>0</b></div></div>
+        <div class="s1in">
+          <div><label for="s1mx0">x0</label><input type="number" id="s1mx0" inputmode="numeric" aria-label="Frame x0"></div>
+          <div><label for="s1my0">y0</label><input type="number" id="s1my0" inputmode="numeric" aria-label="Frame y0"></div>
+          <div><label for="s1mx1">x1</label><input type="number" id="s1mx1" inputmode="numeric" aria-label="Frame x1"></div>
+          <div><label for="s1my1">y1</label><input type="number" id="s1my1" inputmode="numeric" aria-label="Frame y1"></div>
+        </div>
+        <div class="btnrow"><button class="act" id="s1mbgo">Check</button><button class="ghost" id="s1mbnext">Next box →</button><button class="ghost" id="s1mbshow">Show me</button><span class="s1prog" id="s1mbprog"></span></div>
+        <div class="s1fb" id="s1mbfb"></div>
+        <div class="mathbox" id="s1mbmath" style="display:none"></div>
+      </div>
+    </div>
+    <div class="say" data-say="s1">
+      <div class="tag">Say it out loud</div>
+      <div class="line">A frame is 1280 by 720 by 3 whole numbers. Turn it upright, shrink it by one factor onto a grey-114 card, keep RGB. Break any of that and nothing crashes; the detector just gets quietly worse. To use a box, subtract the pad and divide by the scale.</div>
+    </div>
+  </div>
+</section>
+<section id="s2" data-title="The Stencils">
+<style>
+#s2 .two{display:grid;grid-template-columns:1fr 1fr;gap:12px;align-items:start}
+#s2 .kgrid{grid-template-columns:repeat(3,1fr);max-width:210px;margin:6px 0 10px}
+#s2 .kgrid.ro{max-width:150px;margin:4px 0 0}
+#s2 .kgrid.ro span{display:block;text-align:center;font:700 15px/1.4 var(--sign);border:2px solid var(--line);border-radius:6px;padding:2px 0;background:var(--sheet)}
+#s2 .frame{cursor:crosshair;touch-action:none}
+#s2 .frame canvas{border:0;border-radius:0;background:transparent}
+#s2 .frame .ov{background:transparent}
+#s2 .frame.sq{max-width:420px}
+#s2 .fcap{font:400 14.5px/1.3 var(--hand);color:var(--soft);text-align:center;margin-top:5px}
+#s2 .s2patch{display:grid;grid-template-columns:repeat(3,30px);gap:2px;margin:6px 0 8px}
+#s2 .s2patch i{display:block;font:700 12px/24px var(--sign);text-align:center;border:1.5px solid rgba(255,253,246,.55);border-radius:4px;font-style:normal}
+#s2 .mathbox .pad{color:#9FD3D6}
+#s2 .ramp{display:inline-block;width:110px;height:12px;vertical-align:-1px;border:1.5px solid var(--line);border-radius:3px;background:linear-gradient(90deg,#1F6F74,#FBF7EC 50%,#C8452F)}
+#s2 .numrow{display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin:4px 0 8px}
+#s2 .numrow label{font:400 16px var(--hand);color:var(--soft)}
+#s2 .numrow input[type=number]{width:86px}
+#s2 .slide{overflow-x:auto;padding:4px 0}
+#s2 .pipe .st.hot.on{background:#FFF1A8}
+</style>
+<div class="card">
+  <div class="scene" data-art="s2"></div>
+  <h2>2 · The stencils: how a CNN finds edges, then ducks</h2>
+  <p class="lede">The darkroom hands over a 320×320 print. The stencil room never looks at the whole thing at once. A duckling holds a 3×3 <span class="g" data-g="kernel">stencil</span> over one spot, multiplies the nine <span class="g" data-g="pixel">pixels</span> under it by the nine numbers on the stencil, adds them up, and writes the answer on a new sheet, the <span class="g" data-g="featmap">feature map</span>. Then it slides over and does it again, 102,400 times. Stack a few dozen of those layers, each learning its own stencils, and they stop finding edges and start finding bills, heads and whole ducks. That stack is a <span class="g" data-g="cnn">CNN</span>, and yolo11n's is what Microduck runs.</p>
+  <div class="kmap">
+    <div><span class="k" data-i="s2stencil" aria-hidden="true"></span><b>Stencil</b> = a kernel<br><span class="t">nine learned weights, slid over the print</span></div>
+    <div><span class="k" data-i="s2sheet" aria-hidden="true"></span><b>New sheet</b> = a feature map<br><span class="t">where the stencil's pattern was found</span></div>
+    <div><span class="k" data-i="s2prints" aria-hidden="true"></span><b>Smaller prints</b> = <span class="g" data-g="stride">stride</span> 2<br><span class="t">halve the print, five times: 320 → 10</span></div>
+    <div><span class="k" data-i="s2tower" aria-hidden="true"></span><b>Tower floors</b> = the three grids<br><span class="t">strides 8, 16, 32 · 2,100 pigeonholes downstairs</span></div>
+  </div>
+  <p class="covers">Covers <b>HF CV Course, Unit 2</b>: CNN intro (kernels, stride, padding, feature maps), ResNet, MobileNet, transfer learning, and the YOLO page's grids · study guide <code>U2-cnns.md</code></p>
+</div>
+
+<div class="card">
+  <h3>Slide the stencil</h3>
+  <p class="lede">This is the grayscale of the letterboxed input, grey-114 card and all. Pick a stencil or type your own, then hover or tap any cell of the feature map to see the nine multiplications that made it. Exact: the same cross-correlation every deep-learning library calls “convolution” (nobody flips the kernel).</p>
+  <div class="pg">
+    <div class="panel">
+      <div class="lbl">The print</div><div class="seg" id="s2scene"></div>
+      <div class="lbl">Stencil presets</div><div class="seg" id="s2pre"></div>
+      <div class="kgrid" id="s2kgrid" aria-label="3 by 3 stencil weights"></div>
+      <div class="lbl"><span class="g" data-g="stride">Stride</span>, with <span class="g" data-g="padding">padding</span> 1 → sheet <b id="s2fmform"></b></div><div class="seg" id="s2cs"></div>
+      <div class="mathbox" id="s2math"></div>
+    </div>
+    <div>
+      <div class="two">
+        <div><div class="frame" id="s2inf"><canvas id="s2in" class="px" width="320" height="320" aria-label="Grayscale model input, 320 by 320"></canvas><canvas class="ov" id="s2inov" width="320" height="320"></canvas></div><div class="fcap">the print: gray 0–255, 320×320</div></div>
+        <div><div class="frame" id="s2fmf"><canvas id="s2fm" class="px" width="320" height="320" aria-label="Feature map"></canvas><canvas class="ov" id="s2fmov" width="320" height="320"></canvas></div><div class="fcap">the new sheet · <span class="ramp" aria-hidden="true"></span> teal − · paper 0 · brick +</div></div>
+      </div>
+      <div class="grid g3" style="margin-top:12px">
+        <div class="stat"><div class="v" id="s2fmsize"></div><div class="l">feature map</div></div>
+        <div class="stat"><div class="v acc" id="s2fmmax"></div><div class="l">largest |response|</div></div>
+        <div class="stat"><div class="v gold" id="s2fmmul"></div><div class="l">multiply-adds for this one sheet</div></div>
+      </div>
+      <div class="callout co-i" id="s2fmnote"></div>
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <h3>Stride and padding: how big is the new sheet?</h3>
+  <p class="lede">Four knobs decide it. Slide them and watch the window walk across the print. The study guide's worked 5×5 (the course's Prewitt stencil, slid with no padding) is one button away; its top-left answer is 13.</p>
+  <div class="pg">
+    <div class="panel">
+      <div class="sl"><div class="sl-h"><span>Input W</span><b id="s2Wv"></b></div><input type="range" id="s2W" min="3" max="12" step="1" value="5" aria-label="Input size"></div>
+      <div class="sl"><div class="sl-h"><span>Stencil K</span><b id="s2Kv"></b></div><input type="range" id="s2K" min="1" max="5" step="1" value="3" aria-label="Kernel size"></div>
+      <div class="sl"><div class="sl-h"><span><span class="g" data-g="padding">Padding</span> P</span><b id="s2Pv"></b></div><input type="range" id="s2P" min="0" max="2" step="1" value="0" aria-label="Padding"></div>
+      <div class="sl"><div class="sl-h"><span><span class="g" data-g="stride">Stride</span> S</span><b id="s2Sv"></b></div><input type="range" id="s2S" min="1" max="3" step="1" value="1" aria-label="Stride"></div>
+      <div class="lbl">The stencil: right column minus left</div><div id="s2kk"></div>
+      <div class="btnrow" style="margin-top:10px"><button class="act" id="s2play">Play</button><button class="ghost" id="s2step">Step</button><button class="ghost" id="s2ex">The worked 5×5</button></div>
+      <div class="sl"><div class="sl-h"><span>Window</span><b id="s2posv"></b></div><input type="range" id="s2pos" min="0" max="8" step="1" value="0" aria-label="Kernel position"></div>
+      <div class="mathbox" id="s2fmath"></div>
+    </div>
+    <div>
+      <div class="slide" id="s2slide"></div>
+      <div class="grid g3" id="s2gridstat" style="margin-top:10px"></div>
+      <div class="callout co-w"><b>Exact.</b> Cell values are <code>core.conv2d</code> on the numbers shown (padding cells are 0). The size rule is not written down in the course; its Keras summary (28 → 26 → 13 → 11 → 5) obeys it.</div>
+    </div>
+  </div>
+  <div class="predict" data-p="s2a">
+    <div class="tag">Guess first!</div>
+    <div class="q">Run the 320×320 input through a 3×3 stencil with padding 1 and stride 2. How big is the feature map?</div>
+    <div class="opts"><button>320×320</button><button data-right>160×160</button><button>318×318</button><button>106×106</button></div>
+    <div class="why">160×160. ⌊(320 − 3 + 2)÷2⌋ + 1 = ⌊159.5⌋ + 1 = 160. Padding 1 keeps a 3×3 from eating the border; stride 2 halves it. Set the stride switch above to 2 and the sheet shrinks to 160 on the spot. Do that five times and 320 → 160 → 80 → 40 → 20 → 10, which is where the next widget goes.</div>
+  </div>
+</div>
+
+<div class="card">
+  <h3>Why three grids: the print shrinks, the cells see more</h3>
+  <p class="lede">A stride-2 stencil halves the print. Do it five times and 320 becomes 10. Each halving also doubles what one cell stands for, its <span class="g" data-g="receptive">receptive field</span>. <span class="g" data-g="yolo">YOLO</span> keeps the last three prints, 40×40, 20×20 and 10×10, and gives every cell one pigeonhole downstairs: 2,100 in all.</p>
+  <div class="pg">
+    <div class="panel">
+      <div class="sl"><div class="sl-h"><span>Stride-2 layers stacked</span><b id="s2lv"></b></div><input type="range" id="s2layers" min="1" max="5" step="1" value="5" aria-label="Number of stride-2 layers"></div>
+      <div class="mathbox" id="s2rfmath"></div>
+    </div>
+    <div>
+      <div class="pipe" id="s2pipe"></div>
+      <div class="grid g3" id="s2rf"></div>
+    </div>
+  </div>
+  <h3>Which floor suits the duck?</h3>
+  <div class="pg">
+    <div class="panel">
+      <div class="lbl">Grid</div><div class="seg" id="s2grid"></div>
+      <div class="sl"><div class="sl-h"><span>Duck straight ahead, at</span><b id="s2zv"></b></div><input type="range" id="s2z" min="1" max="4" step="0.25" value="3" aria-label="Duck distance in metres"></div>
+      <div class="callout co-i" id="s2gnote"></div>
+    </div>
+    <div>
+      <div class="frame sq"><canvas id="s2gin" class="px" width="320" height="320" aria-label="Letterboxed input with a detection grid drawn over it"></canvas><canvas class="ov" id="s2gov" width="320" height="320"></canvas></div>
+      <div class="grid g2" id="s2gstat" style="margin-top:10px"></div>
+      <div class="callout co-i" id="s2gcite"></div>
+    </div>
+  </div>
+  <div class="predict" data-p="s2b">
+    <div class="tag">Guess first!</div>
+    <div class="q">At 320 px, how many sticky notes (candidate boxes) does the box desk post for one look?</div>
+    <div class="opts"><button>320</button><button data-right>2,100</button><button>102,400</button></div>
+    <div class="why">2,100: one per cell on the three floors, 40² + 20² + 10² = 1,600 + 400 + 100. The same head at the usual 640 input would post 8,400. The robot's own decoder says “2100 candidate boxes out” in its first lines. Step 3 is about what happens to them.</div>
+  </div>
+</div>
+
+<div class="card">
+  <h3>Cheap stencils: MobileNet's trick</h3>
+  <p class="lede">A standard 3×3 stencil taking 32 channels to 64 is really 64 stencils, each 3×3×32. MobileNet's <span class="g" data-g="depthwise">depthwise-separable</span> version splits the job: one 3×3 stencil per input channel (space), then a 1×1 stencil that mixes channels. Same shape out, a fraction of the arithmetic.</p>
+  <div class="pg">
+    <div class="panel">
+      <div class="numrow"><label>C<sub>in</sub> <input type="number" id="s2cin" min="1" max="1024" step="1" value="32" aria-label="Input channels"></label><label>C<sub>out</sub> <input type="number" id="s2cout" min="1" max="1024" step="1" value="64" aria-label="Output channels"></label></div>
+      <div class="lbl">Stencil size k</div><div class="seg" id="s2ck"></div>
+      <div class="sl"><div class="sl-h"><span>Output size (positions)</span><b id="s2oszv"></b></div><input type="range" id="s2osz" min="10" max="320" step="10" value="80" aria-label="Output feature map size"></div>
+      <label class="tg"><input type="checkbox" id="s2bias" checked><span class="sw"></span>Count the bias terms</label>
+      <div class="btnrow"><button class="ghost" id="s2c3264">The course's 32 → 64 layer</button></div>
+      <div class="mathbox" id="s2cmath"></div>
+    </div>
+    <div>
+      <div class="grid g3" id="s2cstat"></div>
+      <canvas id="s2cost" height="110" style="margin-top:12px" aria-label="Multiply-adds, standard versus separable"></canvas>
+      <div class="chartcap">Multiply-adds for one look through this layer. The shortcut: with 3×3 stencils the saving heads toward 9× as C<sub>out</sub> grows.</div>
+      <div class="callout co-i" id="s2npu"></div>
+    </div>
+  </div>
+  <div class="callout co-i"><b>Two more Unit 2 ideas, in one breath.</b> <span class="g" data-g="skip">ResNet's skip connection</span> hands a copy of the print past each stencil table, y = F(x) + x, so a layer only has to learn the edit and very deep stacks stay trainable (YOLO backbones, yolo11n included, are built from such blocks; a general fact about the Ultralytics family, not a repo citation). <span class="g" data-g="transfer">Transfer learning</span> is why 150 frames can train a detector at all: the edge and texture stencils come pre-cut from a big dataset and only the duck-specific layers need the robot's footage (the standard Ultralytics workflow; the repo doesn't say which starting weights were used).</div>
+  <div class="callout co-i"><b>Aside: a stencil works on any 2D grid.</b> Microduck's <code>pet-detect</code> is a ~20 KB CNN that hears the head being scratched: two 3×3 conv layers over a 40-band × 100-frame log-mel spectrogram, frequency down one axis and time along the other. Same slide-multiply-add; the print just happens to be a sound (from the study guide's reading of <code>pet-detect/training/train.py</code>).</div>
+  <div class="callout co-w"><b>Teaching model.</b> The room in the print is the synthetic camera's, not a photo from the robot, and the “which floor suits the duck” rule is this lab's detector's rule of thumb. The convolution, the size formula, the receptive-field arithmetic and every parameter count are exact.</div>
+  <div class="predict" data-p="s2c">
+    <div class="tag">Guess first!</div>
+    <div class="q">Swap the course's 3×3, 32 → 64 layer for a depthwise-separable one. How many fewer weights?</div>
+    <div class="opts"><button>About half</button><button data-right>About 8× fewer</button><button>About 64× fewer</button></div>
+    <div class="why">About 8×. Standard: 3·3·32·64 = 18,432 (+64 biases = 18,496). Separable: 3·3·32 + 32·64 = 288 + 2,048 = 2,336 (+96 biases = 2,432). That's 7.9× without biases, 7.6× with. The shortcut 1/C<sub>out</sub> + 1/k² = 1/64 + 1/9 = 0.127 says the same. Press “The course's 32 → 64 layer” to see it.</div>
+  </div>
+  <div class="say" data-say="s2">
+    <div class="tag">Say it out loud</div>
+    <div class="line">A stencil slides over the print: multiply, add, write it down. Output size is input minus kernel plus twice the padding, over stride, plus one. Stride 2 halves the print; five halvings take 320 to 10, and the last three prints, 40, 20 and 10 on a side, hold the 2,100 pigeonholes.</div>
+  </div>
+</div>
+</section>
+<section id="s3" data-title="The Box Desk">
+<style>
+#s3 .frame{touch-action:none;cursor:crosshair}
+#s3 .frame canvas{border:0;border-radius:0;background:transparent}
+#s3 .frame .ov{background:transparent}
+#s3 .frame.sq{max-width:400px}
+#s3 .two{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px;align-items:start}
+@media(max-width:700px){#s3 .two{grid-template-columns:1fr}}
+#s3 .nt{background:#FFF1A8;border:2px solid var(--line);border-radius:4px;padding:10px 12px;font:400 15px/1.45 var(--hand);box-shadow:3px 4px 0 rgba(74,46,30,.2);transform:rotate(.5deg);margin-top:10px}
+#s3 .nt table{border-collapse:collapse;margin:6px 0;font:400 15px var(--hand)}
+#s3 .nt td{padding:1px 10px 1px 0}
+#s3 .nt td:nth-child(2){font-family:ui-monospace,Menlo,monospace;font-size:13px}
+#s3 .list{max-height:300px;overflow:auto;border:2px solid var(--line);border-radius:8px;background:var(--sheet)}
+#s3 .list .ln{display:grid;grid-template-columns:30px 88px 76px 1fr;gap:6px;padding:3px 8px;font:400 14.5px/1.3 var(--hand);border-bottom:1px dotted rgba(74,46,30,.25);align-items:center}
+#s3 .list .ln.keep{background:#E7F3DE}#s3 .list .ln.shred{background:#FBE3DC;color:var(--soft)}#s3 .list .ln.next{background:#FFF1A8;font-weight:700}#s3 .list .ln.wait{color:var(--soft)}
+#s3 .list .rk{font:700 14px var(--sign)}
+#s3 canvas.full{width:180px;max-width:100%;height:auto;margin:0 auto;display:block}
+#s3 .thumbs{display:flex;flex-wrap:wrap;gap:8px;margin:6px 0 4px}
+#s3 .thumbs figure{margin:0;width:90px;text-align:center}
+#s3 .thumbs canvas.th{width:72px;height:128px;margin:0 auto;border:2px solid var(--line);border-radius:6px}
+#s3 .thumbs figcaption{font:400 13px/1.2 var(--hand);color:var(--soft);margin-top:3px}
+#s3 .empty{font:400 15px var(--hand);color:var(--soft);padding:6px 0}
+#s3 #s3iou{cursor:move;touch-action:none}
+#s3 .sub3{font:400 17px var(--hand);color:var(--brick-d);margin:10px 0 2px}
+#s3 .chiprow{margin:8px 0}
+</style>
+<div class="card">
+  <div class="scene" data-art="s3"></div>
+  <h2>3 · The box desk: 2,100 guesses, one duck</h2>
+  <p class="lede">The stencil room's last three prints come downstairs as a wall of <b>2,100 pigeonholes</b>: 1,600 small, 400 medium, 100 large. Every hole posts one sticky note per look, a <span class="g" data-g="candidate">candidate box</span> and a <span class="g" data-g="score">score</span>, whether or not it saw anything. Nobody at the desk throws a note away. That is <span class="g" data-g="yolo">YOLO</span>'s bargain: one pass, a fixed number of guesses, and a clean-up afterwards. On Microduck the clean-up is <span class="g" data-g="decode">decode</span>: a gate (the <span class="g" data-g="threshold">threshold</span>), a sort, the shredder clerk (<span class="g" data-g="nms">NMS</span>), and a trip back out of the letterbox. Then the inspector grades the whole desk with one number, <span class="g" data-g="map">mAP50</span>.</p>
+  <div class="kmap">
+    <div><span class="k" data-i="s3cubbies" aria-hidden="true"></span><b>Pigeonholes</b> = 2,100 candidates<br><span class="t">40² + 20² + 10², one note each</span></div>
+    <div><span class="k" data-i="s3note" aria-hidden="true"></span><b>Sticky note</b> = box + score<br><span class="t">cx, cy, w, h, and how sure</span></div>
+    <div><span class="k" data-i="s3shredder" aria-hidden="true"></span><b>Shredder clerk</b> = NMS<br><span class="t">“<span class="g" data-g="iou">IoU</span> ≥ 0.5 with a kept note → shred”</span></div>
+    <div><span class="k" data-i="s3inspector" aria-hidden="true"></span><b>Inspector</b> = mAP50<br><span class="t"><span class="g" data-g="precision">precision</span>, <span class="g" data-g="recall">recall</span>, one grade</span></div>
+  </div>
+  <p class="covers">Covers <b>HF CV Course, Unit 6</b>: object detection, IoU, mAP, a segmentation aside · and <b>Unit 2</b>'s YOLO page (grids, NMS) · study guide <code>U6-detection-and-yolo.md</code></p>
+</div>
+
+<div class="card">
+  <h3>The pigeonholes</h3>
+  <p class="lede">One frame: a duck straight ahead. The heat is every hole's score on the floor you pick; the gold outlines are the notes that clear the gate. Tap any hole to read its note, pulled straight out of the raw <span class="g" data-g="planar">planar</span> tensor by index.</p>
+  <div class="pg">
+    <div class="panel">
+      <div class="lbl">Floor</div><div class="seg" id="s3pg"></div>
+      <div class="sl"><div class="sl-h"><span>Gate (<span class="g" data-g="threshold">threshold</span>)</span><b id="s3pthrv"></b></div><input type="range" id="s3pthr" min="0.05" max="0.95" step="0.05" value="0.35" aria-label="Score threshold"></div>
+      <div class="sl"><div class="sl-h"><span>Duck straight ahead, at</span><b id="s3pzv"></b></div><input type="range" id="s3pz" min="1" max="4" step="0.25" value="3" aria-label="Duck distance in metres"></div>
+      <div id="s3note"></div>
+    </div>
+    <div>
+      <div class="frame sq" id="s3pf"><canvas id="s3pin" class="px" width="320" height="320" aria-label="Letterboxed input with the detector's scores as a heat map"></canvas><canvas class="ov" id="s3pov" width="320" height="320"></canvas></div>
+      <div class="chartcap" id="s3pcap"></div>
+      <div class="grid g3" id="s3pstat" style="margin-top:10px"></div>
+      <div class="callout co-i" id="s3pcite"></div>
+    </div>
+  </div>
+  <div class="predict" data-p="s3a">
+    <div class="tag">Guess first!</div>
+    <div class="q">The head hands back twenty boxes on one duck. Is the detector broken?</div>
+    <div class="opts"><button>Yes: retrain it</button><button>Yes: raise the threshold until one is left</button><button data-right>No: the head never suppresses anything; decode's NMS does</button></div>
+    <div class="why">No. Neighbouring holes, often on more than one floor, all see the same duck, and the exported head “does not suppress anything”. Twenty overlapping notes is the normal case, not a fault. Raising the threshold would eventually leave one, but at the price of missing every duck the model is less sure of. The shredder clerk is the right tool: sort by score, keep the top note, shred whatever overlaps it. Slide the gate above and watch the count; then go shred them below.</div>
+  </div>
+</div>
+
+<div class="card">
+  <h3>The shredder: greedy NMS, one note at a time</h3>
+  <p class="lede">Same frame, same notes. The clerk sorts the ones past the gate by score, keeps the first, and shreds every later note whose <span class="g" data-g="iou">IoU</span> with a kept note reaches the limit. Step through it, or run it, then raise the limit and watch duplicates survive. Exact: <code>core.decode</code> is the robot's <code>decode</code>, including its stable sort.</p>
+  <div class="pg">
+    <div class="panel">
+      <div class="sl"><div class="sl-h"><span>Gate (threshold)</span><b id="s3sthrv"></b></div><input type="range" id="s3sthr" min="0.05" max="0.95" step="0.05" value="0.35" aria-label="Score threshold for the shredder"></div>
+      <div class="sl"><div class="sl-h"><span>Shred at IoU ≥</span><b id="s3limv"></b></div><input type="range" id="s3lim" min="0.2" max="0.95" step="0.05" value="0.5" aria-label="IoU limit for NMS"></div>
+      <div class="btnrow"><button class="act" id="s3next">Next note</button><button class="ghost" id="s3all">Run them all</button><button class="ghost" id="s3sreset">Reset</button></div>
+      <div class="mathbox" id="s3smath"></div>
+      <div class="grid g3" id="s3sstat" style="margin-top:10px"></div>
+    </div>
+    <div>
+      <div class="two">
+        <div><div class="frame sq"><canvas id="s3sin" class="px" width="300" height="300" aria-label="A 3x zoom of the input around the duck with candidate boxes: white waiting, gold current, green kept, red shredded"></canvas><canvas class="ov" id="s3sov" width="300" height="300"></canvas></div><div class="chartcap">zoomed ×3 on the duck · white = waiting · gold = the note in the clerk's hand · green = kept · red dashed = shredded</div></div>
+        <div class="list" id="s3list" aria-label="Notes in score order"></div>
+      </div>
+    </div>
+  </div>
+  <div class="sub3">Back out of the letterbox</div>
+  <div class="two">
+    <div><div class="mathbox" id="s3unmath"></div><div class="chartcap">The kept box lives in 320-px input coordinates. <code>decode</code> undoes the darkroom's letterbox so the box lands on the upright 720×1280 frame. (The real code un-letterboxes every note before the sort. Shifting and scaling all boxes alike leaves every IoU unchanged, so the order doesn't change the answer.) The daemon keeps it upright “because that is the space the boxes are in” (<a class="src" href="https://github.com/pollen-robotics/microduck/blob/590b986/mediad/src/detect.rs#L260" target="_blank" rel="noopener">mediad/src/detect.rs:260</a>).</div></div>
+    <div><canvas id="s3full" class="full" width="180" height="320" aria-label="The full upright frame with the kept box drawn on it"></canvas><div class="chartcap" style="text-align:center">the upright frame, kept boxes mapped back</div></div>
+  </div>
+  <div class="callout co-i" id="s3scite"></div>
+  <div class="predict" data-p="s3c">
+    <div class="tag">Guess first!</div>
+    <div class="q">Raise the shredder's limit from IoU ≥ 0.5 to IoU ≥ 0.9. How many boxes come back for the one duck?</div>
+    <div class="opts"><button>Fewer</button><button>The same</button><button data-right>More: near-duplicates survive</button></div>
+    <div class="why">More. At 0.9 a note has to overlap a kept box almost perfectly to be shredded, so slightly shifted notes on the same duck all survive, and one duck comes back as several. Too low a limit has the opposite failure: two ducks standing side by side merge into one. The study guide's worked NMS example agrees: at limit 0.9, its four boxes on two ducks all survive. Slide the limit and count the green boxes.</div>
+  </div>
+</div>
+
+<div class="card">
+  <h3>IoU by hand</h3>
+  <p class="lede">Drag your box over the true duck box; drag the corner square to resize. Brick = the overlap, both tints together = the union. Every grid unit is one pixel, so the arithmetic is exact and the challenges have exact answers.</p>
+  <div class="pg">
+    <div class="panel">
+      <div class="grid g2" id="s3istat"></div>
+      <div class="mathbox" id="s3imath"></div>
+      <div class="chiprow" id="s3chal"></div>
+      <div class="btnrow"><button class="ghost" id="s3icourse">The study guide's 0.25 example</button><button class="ghost" id="s3ireset">Reset</button></div>
+      <div class="chartcap">The study guide's worked pair, A = [100, 100, 200, 200] and B = [150, 120, 250, 220], is a 10×10 box shifted by 5 across and 2 down at this scale: overlap 40, union 160, IoU 0.25.</div>
+    </div>
+    <div>
+      <canvas id="s3iou" height="380" aria-label="Drag a predicted box against the true duck box to see the intersection over union"></canvas>
+    </div>
+  </div>
+  <div class="predict" data-p="s3b">
+    <div class="tag">Guess first!</div>
+    <div class="q">Two 10×10 boxes, one shifted 5 px sideways. What's their IoU?</div>
+    <div class="opts"><button>1/2</button><button data-right>1/3</button><button>1/4</button></div>
+    <div class="why">1/3. Overlap 5 × 10 = 50; union 100 + 100 − 50 = 150; 50 ÷ 150 = 0.333. Half the box overlapping gives only a third of an IoU because the union grows as the overlap shrinks. That's why a “50% match” at IoU 0.5 is a fairly tight box. Make it above: a 10×10 box, offset by 5.</div>
+  </div>
+</div>
+
+<div class="card">
+  <h3>The report card: a held-out session</h3>
+  <p class="lede">The inspector grades a whole recording the detector never trained on, a <span class="g" data-g="heldout">held-out session</span>: 40 frames of the toy room with real ducks, rubber ducks and wall prints, scored by the same <span class="g" data-g="prcurve">precision–recall</span> arithmetic as any detection benchmark and summed up as <span class="g" data-g="ap">AP50</span>. Slide the gate and watch <span class="g" data-g="tp">TP · FP · FN</span> move; switch the look-alikes off to see what <span class="g" data-g="hardneg">hard negatives</span> cost.</p>
+  <div class="pg">
+    <div class="panel">
+      <div class="sl"><div class="sl-h"><span>Gate (threshold)</span><b id="s3rthrv"></b></div><input type="range" id="s3rthr" min="0.05" max="0.95" step="0.05" value="0.35" aria-label="Score threshold for the report card"></div>
+      <label class="tg"><input type="checkbox" id="s3hn" checked><span class="sw"></span>Rubber ducks and prints in the room</label>
+      <div class="mathbox" id="s3rmath"></div>
+      <div class="callout co-w"><b>Teaching model.</b> The room, the recording and every score are this lab's stand-in detector, so the AP here is a toy number. The matching rule, precision, recall and both AP integrals are exact.</div>
+    </div>
+    <div>
+      <canvas id="s3pr" height="260" aria-label="Precision–recall curve with the threshold marked"></canvas>
+      <div class="chartcap">solid = precision vs recall as the gate sweeps from strict to loose · dashed + shaded = the envelope AP integrates · red dot = your gate</div>
+      <div class="grid g3" id="s3rstat" style="margin-top:10px"></div>
+      <div class="sub3">False positives at this gate</div>
+      <div class="thumbs" id="s3fps"></div>
+      <div class="sub3">Misses at this gate</div>
+      <div class="thumbs" id="s3fns"></div>
+      <div class="chartcap" id="s3rcomp"></div>
+      <div class="callout co-i" id="s3rcite"></div>
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <h3>Read the tensor right</h3>
+  <p class="lede">The head's output is <code>[1, 5, 2100]</code>: five long rows, not 2,100 short records. Candidate i's numbers sit at <code>raw[k·2100 + i]</code>. Read it as five numbers per box and all five values come from one row, five neighbouring holes' cx (or cy, or w…). Four in five of the “scores” are really pixel coordinates or box sizes, far over any threshold, and many of the boxes are giants. It doesn't crash. It looks like a weak model.</p>
+  <div class="pg">
+    <div class="panel">
+      <div class="lbl">Read it as</div><div class="seg" id="s3tmode"></div>
+      <div class="sl"><div class="sl-h"><span>Candidate i</span><b id="s3tiv"></b></div><input type="range" id="s3ti" min="0" max="2099" step="1" value="0" aria-label="Candidate index"></div>
+      <div class="mathbox" id="s3tmath"></div>
+    </div>
+    <div>
+      <canvas id="s3ten" height="170" aria-label="The five rows of the output tensor, with the read positions marked"></canvas>
+      <div class="chartcap">The tensor as five shelves of 2,100. Teal = value out of 320 px; brick = score out of 1. Gold = where the reader looks for candidate i.</div>
+      <div class="two" style="margin-top:10px">
+        <div><div class="frame sq"><canvas id="s3tin" class="px" width="320" height="320" aria-label="Decoded boxes on the input"></canvas><canvas class="ov" id="s3tov" width="320" height="320"></canvas></div><div class="chartcap" id="s3tcap"></div></div>
+        <div class="grid" id="s3tstat"></div>
+      </div>
+      <div class="callout co-i" id="s3tcite"></div>
+    </div>
+  </div>
+  <div class="callout co-i"><b>Aside: boxes or masks?</b> Unit 6 also covers <span class="g" data-g="segmentation">segmentation</span>: label every pixel instead of drawing a box. Semantic (all duck pixels one colour), instance (each duck its own mask), panoptic (both). Scored with the same IoU, mask against mask, and the Dice coefficient. Microduck never needs it: the behaviour wants a direction, and a box centre gives that.</div>
+  <div class="say" data-say="s3">
+    <div class="tag">Say it out loud</div>
+    <div class="line">The head posts 2,100 notes and never throws one away. decode reads them planar, drops the ones under the gate, sorts by score, and the shredder shreds any note whose IoU with a kept note is half or more. IoU is overlap over union, and mAP50 is the area under precision–recall, counting a box right at IoU ≥ 0.5.</div>
+  </div>
+</div>
+</section>
+<section id="s4" data-title="The Tiny Ruler">
+<style>
+#s4 .s4-two{display:grid;grid-template-columns:190px minmax(0,1fr);gap:12px;align-items:start}
+@media(max-width:600px){#s4 .s4-two{grid-template-columns:minmax(0,1fr)}}
+#s4 .frame{max-width:190px}
+#s4 canvas.s4-grab{cursor:grab;touch-action:none}
+#s4 canvas.s4-grab:active{cursor:grabbing}
+#s4 .s4-note{display:inline-block;background:#FFF1A8;border:2px solid var(--line);padding:1px 8px 2px;font:700 15px var(--sign);color:var(--brick-d);transform:rotate(-2deg);margin:0 3px}
+#s4 .stat .v.sm{font-size:19px}
+#s4 .s4-src{font:400 13.5px/1.35 var(--hand);color:var(--soft)}
+#s4 .s4-src a{color:var(--sky-d)}
+#s4 .s4-legend span{display:inline-block;margin-right:10px}
+#s4 .s4-legend i{display:inline-block;width:12px;height:12px;border:1.5px solid var(--line);border-radius:2px;vertical-align:-1px;margin-right:4px}
+#s4 .s4-q{font-style:italic}
+#s4 .callout{overflow-wrap:anywhere}
+</style>
+
+<div class="card">
+  <div class="scene" data-art="s4"></div>
+  <h2>4 · The tiny ruler: squeezing the model into 8 bits</h2>
+  <p class="lede">Up at the box desk every sticky note was written with a <span class="g" data-g="float32">float32</span> pen: any value, seven digits. The <span class="g" data-g="npu">NPU</span> is built for a cheaper pen: 8-bit integers, only 256 of them. So before the model boards the robot it is <span class="g" data-g="quant">quantised</span>: every weight and every output is measured with a tiny ruler that has 256 notches, and the gap between notches is set by the biggest number that ruler has to reach. Choose the ruler well and you lose at most half a notch. Share one ruler between 320-pixel box coordinates and 0–1 scores, and the scores vanish. That is Microduck's <b>"about 1.3"</b> bug, and it is written into the real config.</p>
+  <div class="kmap">
+    <div><span class="k" data-i="ruler" aria-hidden="true"></span><b>The tiny ruler</b> = <span class="g" data-g="int8">INT8</span><br><span class="t">256 notches: a <span class="g" data-g="qscale">scale</span> and a <span class="g" data-g="zeropoint">zero point</span></span></div>
+    <div><span class="k" data-i="note" aria-hidden="true"></span><b>Notes reading 1.3</b> = <span class="g" data-g="pertensor">per-tensor</span> scores<br><span class="t">one ruler shared with the box coordinates</span></div>
+    <div><span class="k" data-i="chip" aria-hidden="true"></span><b>The calculator chip</b> = the NPU<br><span class="t">0.8 <span class="g" data-g="tops">TOPS</span> of INT8, one core</span></div>
+    <div><span class="k" data-i="thermo" aria-hidden="true"></span><b>Thermometer + fan</b> = the thermal limit<br><span class="t">why it looks only twice a second</span></div>
+  </div>
+  <p class="covers">Covers <b>HF CV Course, Unit 9</b>: model optimisation (quantisation, pruning, distillation), deployment (ONNX, edge), tools · study guide <code>U9-model-optimization.md</code></p>
+</div>
+
+<div class="card">
+  <h3>The 256-notch ruler</h3>
+  <p class="lede">Pick a float range, pick how many bits, and the ruler is fixed: the <span class="g" data-g="qscale">scale</span> is the gap between notches, the <span class="g" data-g="zeropoint">zero point</span> is the notch that stands for 0.0. Drop a value on it and read what comes back. Inside the range the error is never more than half a step. Outside, the value is <span class="g" data-g="clipping">clipped</span> to the end of the ruler.</p>
+  <div class="pg">
+    <div class="panel">
+      <div class="sl"><div class="sl-h"><span>Float range: min</span><b id="s4minv"></b></div><input type="range" id="s4min" min="-8" max="0" step="0.1" value="-1" aria-label="Float range minimum"></div>
+      <div class="sl"><div class="sl-h"><span>Float range: max</span><b id="s4maxv"></b></div><input type="range" id="s4max" min="0.1" max="8" step="0.1" value="3" aria-label="Float range maximum"></div>
+      <div class="lbl">Bits (notches = 2<sup>bits</sup>)</div><div class="seg" id="s4bits" aria-label="Bits"></div>
+      <div class="lbl">Integers</div><div class="seg" id="s4sign" aria-label="Signed or unsigned"></div>
+      <div class="sl"><div class="sl-h"><span>Value to drop on the ruler, x</span><b id="s4xv"></b></div><input type="range" id="s4x" min="-2.2" max="4.2" step="0.01" value="0.5" aria-label="Value to quantise"></div>
+      <div class="btnrow" id="s4drops"><button class="ghost" data-x="0.5">0.5</button><button class="ghost" data-x="2.2">2.2</button><button class="ghost" data-x="-0.7">−0.7</button><button class="ghost" data-x="4">4.0 (outside)</button><button class="ghost" id="s4preset">U9 example ↻</button></div>
+      <div class="lbl">The course's worked example: <b>[−1.0, 3.0] as uint8</b> gives scale 0.015686 and zero point 64; 0.5 → 96 → 0.50196; 2.2 → 204 → 2.19608; −0.7 → 19 → −0.70588; worst error 0.00784.</div>
+    </div>
+    <div>
+      <canvas id="s4ruler" class="s4-grab" height="230" aria-label="A float ruler above an integer ruler, with a magnifier showing the rounding error" tabindex="0"></canvas>
+      <div class="chartcap">Drag on the top ruler to move x. Hatched ends = outside the range (clipped). Gold = x, teal = what comes back (x̂), red = the error. The magnifier zooms in on the notches around x; dotted lines are the half-step boundaries where rounding flips.</div>
+      <div class="grid g3" style="margin-top:10px">
+        <div class="stat"><div class="v sm" id="s4scale"></div><div class="l">scale s (one notch is worth)</div></div>
+        <div class="stat"><div class="v sm acc" id="s4zp"></div><div class="l">zero point z (the notch for 0.0)</div></div>
+        <div class="stat"><div class="v sm gold" id="s4qv"></div><div class="l">q, the byte that gets stored</div></div>
+        <div class="stat"><div class="v sm" id="s4xh"></div><div class="l">x̂, what comes back</div></div>
+        <div class="stat"><div class="v sm" id="s4err"></div><div class="l">error x̂ − x</div></div>
+        <div class="stat"><div class="v sm" id="s4worst"></div><div class="l">worst possible inside: s ÷ 2</div></div>
+      </div>
+      <div class="chiprow" style="margin-top:8px"><span class="chip" id="s4errchip"></span></div>
+      <div class="mathbox" id="s4qmath"></div>
+    </div>
+  </div>
+  <div class="callout co-i"><b>Exact.</b> This is affine (asymmetric) quantisation, the arithmetic behind every INT8 tool on the course's page 9.3, including the Edge TPU notebook that reads <code>scale, zero_point</code> off the model. The course names quantisation without ever showing it; the study guide's worked example fills that gap, and this ruler reproduces it.</div>
+</div>
+
+<div class="card">
+  <h3>4× smaller?</h3>
+  <p class="lede">A model file is roughly <b>parameters × bytes per parameter</b>. Four bytes for float32, two for float16, one for INT8: the course's "about 4 times". Microduck ships both files side by side, so we can check.</p>
+  <div class="pg">
+    <div class="panel">
+      <div class="sl"><div class="sl-h"><span>Parameters</span><b id="s4pmv"></b></div><input type="range" id="s4pm" min="0.5" max="30" step="0.01" value="2.62" aria-label="Millions of parameters"></div>
+      <div class="lbl">Bytes per parameter</div><div class="seg" id="s4prec" aria-label="Precision"></div>
+      <div class="mathbox" id="s4szmath"></div>
+    </div>
+    <div>
+      <canvas id="s4bars" height="210" aria-label="Textbook model sizes against the two real files"></canvas>
+      <div class="chartcap"><span class="s4-legend"><span><i style="background:#DDBB8A"></i>textbook, from the slider</span><span><i style="background:#F4C430"></i>your pick</span><span><i style="background:#1F6F74"></i>the real files</span></span></div>
+      <div class="grid g3" style="margin-top:10px">
+        <div class="stat"><div class="v sm" id="s4onnx"></div><div class="l">duck_detect.onnx (float, our inference)</div></div>
+        <div class="stat"><div class="v sm acc" id="s4rknn"></div><div class="l">duck_detect.rknn (INT8)</div></div>
+        <div class="stat big"><div class="v" id="s4ratio"></div><div class="l">real shrink, not 4×</div></div>
+      </div>
+      <div class="callout co-i"><b>On the robot.</b> <span data-fact="fileSizes"></span> · <span class="s4-src" data-cite="fileSizes"></span><br>The doc says <span data-fact="int8"></span> · <span class="s4-src" data-cite="int8"></span><br>10,477,940 B ÷ 4 B ≈ <b>2.62 M parameters</b>, which fits a float32 <span data-fact="model"></span> · <span class="s4-src" data-cite="model"></span><br><b>Why 2.72× and not 4× (our inference):</b> a <span class="g" data-g="rknn">.rknn</span> holds the compiled graph as well as the weights (container overhead), and some layers are typically kept at higher precision. We haven't opened the files to check.</div>
+    </div>
+  </div>
+  <div class="predict" data-p="s4b">
+    <div class="tag">Guess first!</div>
+    <div class="q">Does INT8 always shrink a model 4×?</div>
+    <div class="opts"><button>Yes: 4 bytes → 1 byte, always exactly 4×</button><button data-right>In principle; Microduck's real files are 2.7×</button><button>No: INT8 files come out bigger</button></div>
+    <div class="why">In principle, 4 bytes → 1 byte is 4×, and that is why INT8 is the default for edge chips. The two real files say <b>2.72×</b>: 10.48 MB of <span class="g" data-g="onnx">ONNX</span> against 3.85 MB of RKNN. The compiled file carries more than weights, and not every layer is 8-bit. Set the slider to 2.62 M and compare the textbook bars with the real ones.</div>
+  </div>
+</div>
+
+<div class="card">
+  <h3>The 1.3 mystery</h3>
+  <p class="lede">The real config says it plainly: <span class="s4-q" data-fact="score13"></span> · <span class="s4-src" data-cite="score13"></span>. Here is the mechanism, on the teaching detector's raw <b>[5, 2100]</b> output for a duck scene. The box rows need a ruler that reaches ~320 px. One ruler for the whole tensor means one notch ≈ 1.26, and a 0–1 <span class="g" data-g="score">score</span> can only land on notch 0 or notch 1.</p>
+  <div class="pg">
+    <div class="panel">
+      <div class="lbl">Quantisation</div><div class="seg" id="s4q" aria-label="Quantisation mode"></div>
+      <div class="sl"><div class="sl-h"><span>Score threshold</span><b id="s4thrv"></b></div><input type="range" id="s4thr" min="0.01" max="1.4" step="0.01" value="0.35" aria-label="Score threshold"></div>
+      <div class="lbl">Scene</div><div class="seg" id="s4scene" aria-label="Scene"></div>
+      <div class="grid g2" style="margin-top:8px">
+        <div class="stat"><div class="v" id="s4cand"></div><div class="l"><span class="g" data-g="candidate">candidates</span> ≥ threshold</div></div>
+        <div class="stat"><div class="v good" id="s4kept"></div><div class="l">kept after <span class="g" data-g="nms">NMS</span></div></div>
+        <div class="stat"><div class="v sm acc" id="s4step"></div><div class="l">one notch on the score row</div></div>
+        <div class="stat"><div class="v sm" id="s4vals"></div><div class="l">values a score can take</div></div>
+      </div>
+      <div class="chiprow" style="margin-top:8px"><span class="chip" id="s4dial"></span></div>
+      <div class="mathbox" id="s4qhmath"></div>
+    </div>
+    <div>
+      <div class="s4-two">
+        <div class="frame"><canvas id="s4cam" width="180" height="320" aria-label="The camera frame with the surviving boxes"></canvas></div>
+        <div>
+          <canvas id="s4hist" height="236" aria-label="Histograms of the five output rows, float and quantised"></canvas>
+          <div class="chartcap">The five rows of the head's output, each as a histogram (log-count). Grey = float; teal = after the quantisation you picked. The score row is highlighted: under one shared ruler it collapses to two spikes.</div>
+        </div>
+      </div>
+      <canvas id="s4strip" height="170" style="margin-top:10px" aria-label="Before and after strip of the 2,100 scores with the threshold"></canvas>
+      <div class="chartcap">Every one of the 2,100 scores as a tick, before and after. Slide the threshold: in per-tensor mode every score is 0 or one notch (≈1.26), so any threshold from 0.01 up to that notch keeps exactly the same boxes, and above it nothing survives. The cut-over at half a notch (≈0.63) is where a <i>float</i> score rounds up or down, not a threshold. Two positions, not a dial.</div>
+    </div>
+  </div>
+
+  <h3>The inspector's report card, on the held-out session</h3>
+  <p class="lede">Forty frames the detector never trained on (35 ducks, plus rubber ducks and wall prints as look-alikes). Same frames, three ways of storing the head's output.</p>
+  <div class="row"><span class="lbl" style="margin:0">Highlight</span><div class="seg" id="s4apsel" style="margin:0" aria-label="Which curve to highlight"></div></div>
+  <div class="grid g3" style="margin-top:10px">
+    <div class="stat big"><div class="v good" id="s4apf">–</div><div class="l"><span class="g" data-g="map">AP50</span>, float</div></div>
+    <div class="stat big"><div class="v bad" id="s4apt">–</div><div class="l">AP50, INT8 one shared scale</div></div>
+    <div class="stat big"><div class="v good" id="s4apc">–</div><div class="l">AP50, INT8 <span class="g" data-g="perchannel">per-channel</span></div></div>
+  </div>
+  <canvas id="s4pr" height="220" style="margin-top:10px" aria-label="Precision-recall curves for the three modes"></canvas>
+  <div class="chartcap">Precision against recall as the inspector walks down the ranked list. Float and per-channel lie on top of each other. Per-tensor can't rank: every survivor scores one notch (1.25 to 1.27 here, because the toy measures each frame's range; a real export fixes one scale), so the order comes from grid position, not confidence, and the curve stair-steps.</div>
+  <div class="callout co-i" id="s4apnote"></div>
+  <div class="callout co-w"><b>Teaching model.</b> The scene, the detector and its scores are ours (the real yolo11n scored mAP50 <b>0.976</b> on its own held-out session · <span class="s4-src" data-cite="training"></span>). The quantisation, decode, NMS, IoU and AP arithmetic are exact. The <b>0.979</b> is a toy number that happens to sit near the real one.</div>
+  <div class="callout co-i"><b>Why the ranking is lost, and why precision can even look better.</b> NMS and the inspector both sort by score. With every real detection reading exactly one notch, the sort has nothing to sort: <span class="g" data-g="tie">ties</span> stay in grid order, so the box that survives is whichever cell came first, not the most confident one. Meanwhile the weak look-alikes (a rubber duck at 0.4–0.6) round to <b>0</b> and disappear, so precision at 0.35 can rise while AP falls. Toggle per-channel and the score row gets its own ruler (one notch ≈ 0.004): the scores, the ranking and the AP all come back.</div>
+  <div class="callout co-i"><b>On the robot.</b> <span data-fact="threshold"></span> · <span class="s4-src" data-cite="threshold"></span>. The bring-up doc's float-vs-INT8 check: <span data-fact="int8"></span> · <span class="s4-src" data-cite="int8"></span>. Two detections is a <b>smoke test, not a benchmark</b>; a fuller check would compare float and INT8 AP on the held-out session, which is what the card above does for the toy. Box coordinates survive the shared ruler because half a notch is ≈0.63 px in the 320 input, about 2.5 px in the 1280-px frame: small next to a duck.</div>
+  <div class="predict" data-p="s4a">
+    <div class="tag">Guess first!</div>
+    <div class="q">Why does every detection on the robot read about 1.3?</div>
+    <div class="opts"><button>The model is over-confident after training</button><button data-right>One quantisation scale is shared with the box coordinates</button><button>The RKNN conversion is broken</button></div>
+    <div class="why">One shared scale. The output tensor holds box coordinates up to ~320 px and scores from 0 to 1, under one scale and one zero point. A notch is ≈1.26, so a score rounds to 0 or to one notch. Real detections read ≈1.3, everything else reads 0, and the conversion is working exactly as asked. Give the score row its own scale (per-channel) and the probabilities return.</div>
+  </div>
+  <div class="predict" data-p="s4c">
+    <div class="tag">Guess first!</div>
+    <div class="q">INT8 with one shared scale. You move the threshold from 0.2 up to 0.6. How many detections change?</div>
+    <div class="opts"><button>Most of the weak ones drop out</button><button data-right>None</button><button>All of them drop out</button></div>
+    <div class="why">None. Every surviving score is exactly one notch (≈1.26) and every other score is exactly 0, so any threshold above 0 and below one notch keeps the same boxes. The same <code>threshold = 0.35</code> is a real probability cut when the float <code>.onnx</code> runs on the CPU (the file size says it is float; our inference). On the NPU the same number is an on/off switch.</div>
+  </div>
+</div>
+
+<div class="card">
+  <h3>Walks badly to see well</h3>
+  <p class="lede">A look costs about 60 ms, so speed alone would allow ~16 looks a second. The robot takes two. <span class="s4-q" data-fact="thermal"></span> · <span class="s4-src" data-cite="thermal"></span>. Slide the rate and watch the board, the clock, and the 50 Hz walking loop that shares the CPU.</p>
+  <div class="pg">
+    <div class="panel">
+      <div class="sl"><div class="sl-h"><span>Looks per second</span><b id="s4hzv"></b></div><input type="range" id="s4hz" min="0.5" max="16.7" step="0.1" value="2" aria-label="Looks per second"></div>
+      <div class="btnrow" id="s4hzbtns"><button class="ghost" data-hz="2">shipped: 2 Hz</button><button class="ghost" data-hz="10">10 Hz</button><button class="ghost" data-hz="16.7">flat out</button></div>
+      <div class="grid g2" style="margin-top:8px">
+        <div class="stat"><div class="v" id="s4temp"></div><div class="l">board temperature</div></div>
+        <div class="stat"><div class="v" id="s4clk"></div><div class="l">CPU clock</div></div>
+        <div class="stat"><div class="v sm" id="s4per"></div><div class="l">time between looks</div></div>
+        <div class="stat"><div class="v sm acc" id="s4duty"></div><div class="l"><span class="g" data-g="duty">duty cycle</span> at 60 ms a look</div></div>
+      </div>
+      <div class="mathbox" id="s4tmath"></div>
+      <div class="callout co-w"><b>Teaching model.</b> Only the flat-out anchor is from the repo: ~60 ms a look, 95 °C, and the CPU <span class="g" data-g="throttle">throttling</span> to 408 MHz. The curve between idle and flat out, the 90 °C throttle line, and the missed-tick picture are ours, drawn to show the shape of the trade.</div>
+    </div>
+    <div>
+      <div class="s4-two" style="grid-template-columns:150px minmax(0,1fr)">
+        <canvas id="s4thermo" height="230" aria-label="Thermometer with the throttle line"></canvas>
+        <div>
+          <canvas id="s4ticks" height="230" aria-label="One second of the 50 Hz walking loop, with looks laid on top"></canvas>
+          <div class="chartcap">One second of the walking loop: 50 ticks of 20 ms. Each look lays ~60 ms (3 ticks) of work on the shared CPU. Throttled to 408 MHz, the tick's own work no longer fits its 20 ms and ticks are missed: a robot that walks badly to see well.</div>
+        </div>
+      </div>
+      <div class="callout co-i"><b>On the robot.</b> <span data-fact="work"></span> · <span class="s4-src" data-cite="work"></span> · <span data-fact="controlHz"></span> · <span class="s4-src" data-cite="controlHz"></span> · latency <span data-fact="latency"></span> · <span class="s4-src" data-cite="latency"></span> · <span data-fact="npu"></span> · <span class="s4-src" data-cite="npu"></span></div>
+    </div>
+  </div>
+  <div class="callout co-w"><b>Not in the course.</b> Rockchip's RKNN toolchain (<code>rknn-toolkit2</code> to convert, <code>rknpu2</code> to run) appears nowhere in Unit 9. The nearest analogue is the Edge TPU notebook: full-integer post-training quantisation with a representative dataset, then a vendor compiler for one chip. The per-tensor-vs-per-channel choice that decides the 1.3 bug isn't in the course either; the study guide covers it.</div>
+  <div class="say" data-say="s4">
+    <div class="tag">Say it out loud</div>
+    <div class="line">INT8 measures every number on a ruler with 256 notches: the scale is the gap, the zero point is where 0 sits, and inside the range you lose at most half a notch. Share one ruler between 320-pixel coordinates and 0–1 scores and every score lands on notch 0 or notch 1: about 1.3 or nothing. And the robot looks twice a second because of heat, not speed.</div>
+  </div>
+</div>
+</section>
+<section id="s5" data-title="The Map Room">
+<style>
+#s5 .s5-two{display:grid;grid-template-columns:minmax(0,1fr) 190px;gap:12px;align-items:start}
+@media(max-width:600px){#s5 .s5-two{grid-template-columns:minmax(0,1fr)}}
+#s5 .frame{max-width:190px}
+#s5 canvas.s5-grab{cursor:grab;touch-action:none}
+#s5 canvas.s5-grab:active{cursor:grabbing}
+#s5 .stat .v.sm{font-size:19px}
+#s5 .s5-src{font:400 13.5px/1.35 var(--hand);color:var(--soft)}
+#s5 .s5-src a{color:var(--sky-d)}
+#s5 .s5-q{font-style:italic}
+#s5 .s5-legend span{display:inline-block;margin-right:10px}
+#s5 .s5-legend i{display:inline-block;width:14px;height:0;border-top:3px solid;vertical-align:3px;margin-right:4px}
+#s5 .s5-legend i.dash{border-top-style:dashed}
+#s5 .s5-kv{font:400 15px/1.5 var(--hand);color:var(--soft)}
+#s5 .s5-kv b{color:var(--ink);font:700 16px var(--sign)}
+#s5 .callout{overflow-wrap:anywhere}
+</style>
+
+<div class="card">
+  <div class="scene" data-art="s5"></div>
+  <h2>5 · The map room: turning a pixel into a direction</h2>
+  <p class="lede">The box desk hands the neck crank a <span class="g" data-g="bearing">bearing</span>: where the box sits across the frame, −1 to +1. That is a position on paper, not an angle in the room. To turn it into "9.6° to the right" you need the camera's <span class="g" data-g="intrinsics">intrinsics</span>, the numbers that say how the <span class="g" data-g="pinhole">pinhole</span> maps the world onto the sensor. Microduck's are still placeholders, and this mount has a trap: the camera is turned on its side, so the sensor's famous 62° runs <i>up and down</i>, and the left-right view is at most about 37°.</p>
+  <div class="kmap">
+    <div><span class="k" data-i="pinhole" aria-hidden="true"></span><b>Pinhole + strings</b> = projection<br><span class="t">u = c<sub>x</sub> + f · X ÷ Z, exact</span></div>
+    <div><span class="k" data-i="protractor" aria-hidden="true"></span><b>The protractor</b> = bearing → angle<br><span class="t">atan(b · tan(FOV ÷ 2)), needs the <span class="g" data-g="focal">focal length</span></span></div>
+    <div><span class="k" data-i="sensor" aria-hidden="true"></span><b>The sensor, cropped and turned</b> = the <span class="g" data-g="sensormode">sensor mode</span><br><span class="t">4:3 chip, 16:9 crop, quarter turn</span></div>
+    <div><span class="k" data-i="crank" aria-hidden="true"></span><b>The neck crank</b> = the head turn<br><span class="t">and the <span class="g" data-g="overturn">over-turn</span> a wrong f causes</span></div>
+  </div>
+  <p class="covers">Covers <b>HF CV Course, Unit 8</b> (part 1): camera models, intrinsics, linear algebra for 3D · study guide <code>U8a-camera-geometry.md</code></p>
+</div>
+
+<div class="card">
+  <h3>Where's the duck?</h3>
+  <p class="lede">Drag the other duck around the room. The camera frame on the right shows exactly where the pinhole model puts it, with its box. The readouts turn that box into an angle four ways: the truth, the correct intrinsics, a placeholder that puts "62° across the width" (our guess at what a placeholder would do), and the lazy linear guess.</p>
+  <div class="pg">
+    <div class="panel">
+      <div class="lbl">Sensor mode (sets the true intrinsics)</div><div class="seg" id="s5mode" aria-label="Sensor mode"></div>
+      <div class="sl"><div class="sl-h"><span>Duck: metres to the right (x)</span><b id="s5xv"></b></div><input type="range" id="s5x" min="-3" max="3" step="0.01" value="0.507" aria-label="Duck x position in metres"></div>
+      <div class="sl"><div class="sl-h"><span>Duck: metres ahead (z)</span><b id="s5zv"></b></div><input type="range" id="s5z" min="0.5" max="5" step="0.01" value="3" aria-label="Duck z position in metres"></div>
+      <div class="btnrow" id="s5presets"><button class="ghost" data-b="0.5" data-z="3">b = +0.5 at 3 m</button><button class="ghost" data-b="0" data-z="2">dead ahead, 2 m</button><button class="ghost" data-b="-0.9" data-z="4">far left, 4 m</button></div>
+      <div class="grid g2" style="margin-top:8px">
+        <div class="stat"><div class="v sm" id="s5box"></div><div class="l">pixel box in the 720×1280 frame</div></div>
+        <div class="stat"><div class="v sm acc" id="s5b"></div><div class="l">bearing b, the robot's number</div></div>
+      </div>
+    </div>
+    <div>
+      <div class="s5-two">
+        <div>
+          <canvas id="s5map" class="s5-grab" height="330" aria-label="Top-down room with the camera's field of view; drag the duck" tabindex="0"></canvas>
+          <div class="chartcap"><span class="s5-legend"><span><i style="border-color:#3B7422"></i>true direction</span><span><i style="border-color:#C8452F"></i>placeholder's guess</span><span><i class="dash" style="border-color:#C98A0B"></i>lazy linear guess</span><span><i style="border-color:#1F6F74"></i>real view wedge</span><span><i class="dash" style="border-color:#C8452F"></i>the doc's 62°</span></span></div>
+        </div>
+        <div>
+          <div class="frame"><canvas id="s5cam" width="216" height="384" aria-label="The upright camera frame with the duck's box"></canvas></div>
+          <div class="chartcap">the upright frame, box in green, bearing arrow below</div>
+        </div>
+      </div>
+      <div class="grid g3" style="margin-top:10px">
+        <div class="stat"><div class="v good" id="s5true"></div><div class="l">true angle, atan2(x, z)</div></div>
+        <div class="stat"><div class="v good" id="s5cor"></div><div class="l">from b with the correct f</div></div>
+        <div class="stat"><div class="v bad" id="s5ph"></div><div class="l">from b with a 62°-wide placeholder (f = 599.1, our guess)</div></div>
+        <div class="stat"><div class="v warn" id="s5lin"></div><div class="l">lazy linear guess, b × 31°</div></div>
+        <div class="stat big"><div class="v bad" id="s5over"></div><div class="l">the head's over-turn</div></div>
+        <div class="stat big"><div class="v bad" id="s5overm"></div><div class="l">off to the side at the duck's distance</div></div>
+      </div>
+      <div class="mathbox" id="s5bmath"></div>
+    </div>
+  </div>
+  <div class="callout co-i"><b>On the robot.</b> <span data-fact="bearing"></span> · <span class="s5-src" data-cite="bearing"></span>. The open TODO: <span data-fact="intrinsics"></span> · <span class="s5-src" data-cite="intrinsics"></span>. The repo doesn't show the placeholder values, so the red tags are our guess at them. Whatever they are, nothing crashes when the intrinsics are wrong: every pixel-to-angle conversion is off by the same factor in tan(angle). If the placeholder put 62° across the width, the head would turn too far, and at 3 m the gaze would land about 0.39 m beside a 25 cm duck. Whether the gaze code will use a bearing or a full 3D point is theirs to decide; the geometry is the same either way (our reading).</div>
+  <div class="predict" data-p="s5b">
+    <div class="tag">Guess first!</div>
+    <div class="q">A duck comes back at bearing +0.5. How many degrees to the right is it?</div>
+    <div class="opts"><button>15.5°: half of 31°</button><button>16.7°: 62° across the width, through the tangent</button><button data-right>About 9.6°, with the widest mode this mount allows</button></div>
+    <div class="why">About 9.6°. The 62° belongs to the sensor's long axis, which the mount makes vertical. Left to right the widest any 16:9 mode can see is 37.35°, so b = 0.5 is atan(0.5 × tan 18.7°) = <b>9.6°</b>. The placeholder's 16.7° would turn the head 7° too far. Press <b>b = +0.5 at 3 m</b> and read the red tags.</div>
+  </div>
+</div>
+
+<div class="card">
+  <h3>The sensor-mode puzzle</h3>
+  <p class="lede">The IMX219 is a 4:3 chip, 3280×2464. Every 16:9 video mode has to throw rows away, and some throw columns away too. Then the mount turns the picture a quarter turn. Which mode the robot runs decides the true left-right field of view, and the repo doesn't pin it down yet.</p>
+  <div class="pg">
+    <div class="panel">
+      <div class="lbl">16:9 mode</div><div class="seg" id="s5smode" aria-label="Sensor mode for the puzzle"></div>
+      <div class="grid g2" style="margin-top:8px">
+        <div class="stat"><div class="v acc" id="s5fovlr"></div><div class="l">left-right <span class="g" data-g="fov">FOV</span>, after the turn</div></div>
+        <div class="stat"><div class="v" id="s5fovv"></div><div class="l">up-down FOV</div></div>
+        <div class="stat"><div class="v sm" id="s5f"></div><div class="l">focal length f, pixels</div></div>
+        <div class="stat"><div class="v sm gold" id="s5duckpx"></div><div class="l">a 25 cm duck at 3 m, in the frame</div></div>
+        <div class="stat big"><div class="v gold" id="s5duckin"></div><div class="l">the same duck in the 320 input</div></div>
+      </div>
+      <div class="mathbox" id="s5smath"></div>
+    </div>
+    <div>
+      <canvas id="s5sensor" height="280" aria-label="The sensor, the 16:9 crop, and the crop turned upright"></canvas>
+      <canvas id="s5fovbar" height="140" style="margin-top:10px" aria-label="Left-right field of view on a scale, with the ceiling and the doc's figure"></canvas>
+      <div class="chartcap">Left-right FOV on a scale. The teal marker is your mode. 37.35° is the ceiling for any 16:9 frame with square pixels: a full-width crop keeps all 3280 columns but only 1845 of the 2464 rows. The whole 4:3 short side would be 48.6° by this model (the Pi Camera v2 sheet quotes 48.8°), and a 16:9 frame can't use it. 62° is the long axis, which now points up.</div>
+      <div class="callout co-i"><b>Narrower is bigger.</b> A tighter field of view means a longer focal length, and the duck covers more pixels: 22.2 px in the input for the full-width mode, 37.9 px for a 1080p centre crop. So "22 px at 3 m" is the floor for how big the duck can look, not the ceiling. Which mode <code>mediad</code> runs is a question for the team.</div>
+    </div>
+  </div>
+  <div class="callout co-i"><b>On the robot.</b> <span data-fact="stream"></span> · <span class="s5-src" data-cite="stream"></span> · <span data-fact="turn"></span> · <span class="s5-src" data-cite="turn"></span> · <span data-fact="sensor"></span> · <span class="s5-src" data-cite="sensor"></span>. The 3280×2464 active area is the sensor's spec, not from the repo.</div>
+  <div class="predict" data-p="s5a">
+    <div class="tag">Guess first!</div>
+    <div class="q">The design doc says the camera has a ~62° field of view. How wide does the robot actually see left to right?</div>
+    <div class="opts"><button>About 62°</button><button>About 48.8°, the sensor's short side</button><button data-right>At most about 37°</button></div>
+    <div class="why">At most about 37°. The 62° is along the sensor's long axis, and the mount turns that axis vertical. Left to right the frame runs along the sensor's short axis, and a 16:9 frame with square pixels can only use 1845 of the 2464 rows, so it tops out at 2·atan(tan 31° × 1845 ÷ 3280) = <b>37.35°</b>. A mode that also crops the width is narrower still. Calibration settles it.</div>
+  </div>
+</div>
+
+<div class="card">
+  <h3>The 25 px check</h3>
+  <p class="lede">The design doc's range estimate: <span class="s5-q" data-fact="rangeMath"></span> · <span class="s5-src" data-cite="rangeMath"></span>. Three ways to get that number, all in one box, with a distance slider.</p>
+  <div class="pg">
+    <div class="panel">
+      <div class="sl"><div class="sl-h"><span>Distance to the duck</span><b id="s5dv"></b></div><input type="range" id="s5d" min="0.5" max="8" step="0.1" value="3" aria-label="Distance in metres"></div>
+      <div class="grid g3" style="margin-top:8px">
+        <div class="stat"><div class="v warn" id="s5ppd"></div><div class="l">"pixels per degree" shortcut</div></div>
+        <div class="stat"><div class="v acc" id="s5pin"></div><div class="l">pinhole, 320 px across 62°</div></div>
+        <div class="stat"><div class="v good" id="s5port"></div><div class="l">portrait mount, 180-px picture area</div></div>
+      </div>
+    </div>
+    <div>
+      <div class="mathbox" id="s5dmath"></div>
+      <canvas id="s5input" height="200" style="margin-top:10px" aria-label="The 320 by 320 model input with the duck's height marked"></canvas>
+      <div class="chartcap">The model's 320×320 input: 70 px of grey 114 each side, a 180-px-wide picture, and the duck's height in pixels. Pixels per degree are not constant in a pinhole image (the shortcut averages them), which is the ~10% gap between 24.6 and 22.2. The portrait mount gives the same 22.2 because 180 ÷ 320 = 720 ÷ 1280: the crop and the letterbox scale cancel.</div>
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <h3>Depth is lost</h3>
+  <p class="lede">The projection only ever uses the ratios X ÷ Z and Y ÷ Z. Scale a point away from the camera along its <span class="g" data-g="ray">ray</span> and it lands on exactly the same pixel. That is why a single camera can say "which direction" and never "how far", and why step 6 brings in the tape measure.</p>
+  <div class="pg">
+    <div class="panel">
+      <div class="sl"><div class="sl-h"><span>X, metres right</span><b id="s5Xv"></b></div><input type="range" id="s5X" min="-1.5" max="1.5" step="0.01" value="0.5" aria-label="X in metres"></div>
+      <div class="sl"><div class="sl-h"><span>Y, metres down (up is negative)</span><b id="s5Yv"></b></div><input type="range" id="s5Y" min="-1" max="1" step="0.01" value="-0.2" aria-label="Y in metres"></div>
+      <div class="sl"><div class="sl-h"><span>Z, metres ahead</span><b id="s5Zv"></b></div><input type="range" id="s5Z" min="0.5" max="6" step="0.01" value="3" aria-label="Z in metres"></div>
+      <div class="sl"><div class="sl-h"><span>Slide the point along its ray: × k</span><b id="s5kv"></b></div><input type="range" id="s5k" min="0.5" max="3" step="0.01" value="2" aria-label="Scale factor along the ray"></div>
+      <div class="btnrow"><button class="ghost" id="s5dpre">(0.5, −0.2, 3.0) and ×2 ↻</button></div>
+      <div class="s5-kv">Toy camera from the study guide: a 320×240 image, 62° across it, so f = <b>266.3 px</b>, c<sub>x</sub> = <b>160</b>, c<sub>y</sub> = <b>120</b>. OpenCV axes: +X right, +Y down, +Z forward.</div>
+    </div>
+    <div>
+      <canvas id="s5depth" height="240" aria-label="Top-down view of the ray through the pinhole to the image plane, and the image with both points on one pixel"></canvas>
+      <div class="mathbox" id="s5pmath"></div>
+      <div class="grid g2" style="margin-top:10px">
+        <div class="stat"><div class="v acc" id="s5p1"></div><div class="l">pixel of (X, Y, Z)</div></div>
+        <div class="stat"><div class="v acc" id="s5p2"></div><div class="l">pixel of k·(X, Y, Z)</div></div>
+      </div>
+    </div>
+  </div>
+  <div class="callout co-i"><b>Same math as the arm.</b> Moving points between the camera, the head and the trunk uses 4×4 <span class="g" data-g="homog">homogeneous</span> transforms: a rotation block, a translation column, chains read right to left. That is exactly the Robotics course's forward kinematics, and Microduck's <code>kinematics</code> crate does it for the head: it stores each pose as a position plus a quaternion, the same information (our reading of <code>kinematics/src/head.rs</code>); the ToF points reach the trunk that way too (<span class="s5-src" data-cite="tofReproject"></span>). If you built the <a href="https://bakulbadwal.github.io/arm-playground/" target="_blank" rel="noopener">Arm Playground</a>, the <span class="g" data-g="extrinsics">extrinsics</span> here are a recap.</div>
+  <div class="callout co-i"><b>On the robot.</b> <span data-fact="fusion"></span> · <span class="s5-src" data-cite="fusion"></span>. The camera gives the direction; the 8×8 <span class="g" data-g="tof">ToF</span> grid gives the distance. Step 6.</div>
+  <div class="predict" data-p="s5c">
+    <div class="tag">Guess first!</div>
+    <div class="q">Move the duck from 3 m to 6 m along the same line of sight. What happens to the pixel its centre lands on?</div>
+    <div class="opts"><button>It moves toward the centre of the image</button><button data-right>It stays exactly where it was; only the box shrinks</button><button>It moves toward the edge</button></div>
+    <div class="why">It stays put. u = c<sub>x</sub> + f · X ÷ Z, and doubling X and Z together leaves X ÷ Z unchanged: (0.5, −0.2, 3.0) and (1.0, −0.4, 6.0) both land on (204.4, 102.2). The box gets smaller, and that size is the only hint of distance a single frame carries, which is why the plan pairs the camera with a ToF sensor.</div>
+  </div>
+  <div class="say" data-say="s5">
+    <div class="tag">Say it out loud</div>
+    <div class="line">A pixel is the focal length times the ray's slope, plus the centre. Bearing is a position across the frame, not an angle: to make it one you need the intrinsics, and on this sideways mount the left-right view is at most about 37°, so +0.5 is about 9.6°, not 16.7°. And one pixel is a whole ray: depth is lost.</div>
+  </div>
+</div>
+</section>
+<section id="s6" data-title="How Far?">
+<style>
+#s6 .s6two{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px;align-items:start}
+@media(max-width:640px){#s6 .s6two{grid-template-columns:1fr}}
+#s6 .s6frame{max-width:300px;margin:0 auto}
+#s6 .s6crops{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px}
+#s6 .s6crops canvas{background:#727272}
+#s6 .s6crops .l{font:400 14.5px/1.3 var(--hand);color:var(--soft);text-align:center;margin-top:4px}
+#s6 canvas.s6drag{touch-action:none;cursor:grab}
+#s6 .s6zonegrid{background:var(--sheet)}
+#s6 .s6legend{display:flex;flex-wrap:wrap;gap:8px 14px;font:400 14.5px/1.3 var(--hand);color:var(--soft);margin-top:6px}
+#s6 .s6legend i{display:inline-block;width:14px;height:14px;border:1.5px solid var(--line);border-radius:3px;vertical-align:-2px;margin-right:4px}
+#s6 .s6steps{display:grid;gap:8px;margin:8px 0}
+#s6 .s6step{background:var(--sheet);border:2px solid var(--line);border-radius:8px;padding:8px 10px;font-size:15px}
+#s6 .s6step b.n{display:inline-block;width:24px;height:24px;border-radius:50%;background:var(--yellow);border:2px solid var(--line);text-align:center;font:700 14px/20px var(--sign);margin-right:6px}
+#s6 .s6step.hit{background:#E7F3DE}
+#s6 .s6step.miss{background:#FBE3DC}
+#s6 .s6rel{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;font:400 15.5px/1.5 var(--hand);align-items:center}
+#s6 .s6rel code{font-size:15px}
+#s6 .s6rel .arr{color:var(--soft)}
+#s6 .s6tofrow{display:grid;grid-template-columns:repeat(8,1fr);gap:3px;margin:6px 0}
+#s6 .s6tofrow div{border:2px solid var(--line);border-radius:5px;text-align:center;font:700 14px/1.6 var(--sign);background:var(--sheet);min-height:26px}
+#s6 .s6tofrow div.on{background:#FFF1A8}
+#s6 .s6tofrow div.jo{background:#BFE3A6}
+#s6 .s6pick{font:400 15px var(--hand);color:var(--soft)}
+#s6 .s6chart{margin-top:10px}
+#s6 .s6stat3{margin-top:10px}
+#s6 .panel .stat{padding:20px 4px 8px}
+#s6 .panel .stat .v{font-size:19px}
+#s6 .panel .stat .l{font-size:13.5px}
+#s6 .panel .grid.g3{grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+#s6 .panel .grid.g2{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+#s6 .callout{overflow-wrap:anywhere}
+</style>
+  <div class="card">
+    <div class="scene" data-art="s6"></div>
+    <h2>6 · How far? One eye can't tell</h2>
+    <p class="lede">The map room turned a box into a <span class="g" data-g="bearing">bearing</span>. It cannot turn a box into a distance: a pinhole keeps only the ray, and every point along a ray lands on the same <span class="g" data-g="pixel">pixel</span>. This step is about getting distance back. People do it with two eyes (<span class="g" data-g="stereo">stereo</span>). Networks try to guess it from one image (<span class="g" data-g="monodepth">monocular depth</span>), and usually get the shape but not the metres. Microduck's plan sidesteps both: the <span class="g" data-g="tof">tape measure with 64 beams</span> measures distance directly, and the <span class="g" data-g="ble">radio mast</span> says <i>which</i> duck it is, because the camera cannot tell two identical Microducks apart. The last widget makes you do the <span class="g" data-g="fusion">fusion</span> yourself.</p>
+    <div class="kmap">
+      <div><span class="k" data-i="tape" aria-hidden="true"></span><b>Tape measure</b> = the ToF sensor<br><span class="t">8 × 8 zones of distance over a 45° square</span></div>
+      <div><span class="k" data-i="star" aria-hidden="true"></span><b>Radio mast</b> = the BLE beacon<br><span class="t">identity and presence, not position</span></div>
+      <div><span class="k" data-i="dial" aria-hidden="true"></span><b>Two eyes on a bar</b> = stereo<br><span class="t">depth from disparity; Microduck has one eye</span></div>
+      <div><span class="k" data-i="duck" aria-hidden="true"></span><b>A known-size ruler</b> = Z = f·H ÷ h<br><span class="t">only works if you know what you're looking at</span></div>
+    </div>
+    <p class="covers">Covers <b>HF CV Course, Unit 8</b>: stereo vision, disparity, monocular depth (relative vs metric) · <b>Unit 10</b> (one line): synthetic data with BlenderProc · study guide <code>U8b-depth-and-stereo.md</code></p>
+  </div>
+
+  <div class="card">
+    <h3>Small and near, or big and far?</h3>
+    <p class="lede">A 10 cm rubber duck and a 25 cm Microduck. Slide the rubber duck toward the camera and watch its box grow. At one distance it is <i>exactly</i> as tall in the picture as the robot duck at 3 m. The <span class="g" data-g="knownsize">known-size cue</span> Z = f·H ÷ h can turn that height back into metres, but only if you already know which object it is.</p>
+    <div class="pg">
+      <div class="panel">
+        <div class="sl"><div class="sl-h"><span>Rubber duck distance</span><b id="s6nzv"></b></div><input type="range" id="s6nz" min="0.5" max="3" step="0.05" value="2" aria-label="Rubber duck distance in metres"></div>
+        <div class="lbl">The robot duck stays at <b>3.0 m</b>. Full-frame focal length f = <b>1065.1 px</b> (this lab's full-width 16:9 model, step 5); the model input is ¼ of the frame.</div>
+        <div class="grid g2 s6stat3">
+          <div class="stat"><div class="v acc" id="s6nh1">–</div><div class="l">rubber duck height in the frame</div></div>
+          <div class="stat"><div class="v" id="s6nh2">–</div><div class="l">Microduck height in the frame (3 m)</div></div>
+          <div class="stat"><div class="v" id="s6ni1">–</div><div class="l">rubber duck, in the 320 input</div></div>
+          <div class="stat"><div class="v" id="s6ni2">–</div><div class="l">Microduck, in the 320 input</div></div>
+        </div>
+        <div class="mathbox" id="s6nmath"></div>
+      </div>
+      <div>
+        <div class="frame s6frame"><canvas id="s6ncam" width="252" height="448" aria-label="Camera view of a rubber duck and a Microduck"></canvas></div>
+        <div class="s6crops">
+          <div><canvas id="s6ncropA" class="px" height="150" aria-label="Crop around the rubber duck"></canvas><div class="l">the rubber duck, cut out</div></div>
+          <div><canvas id="s6ncropB" class="px" height="150" aria-label="Crop around the Microduck"></canvas><div class="l">the Microduck, cut out</div></div>
+        </div>
+        <div class="chartcap">Both cut-outs use the same magnification. When the boxes are the same height, their height says nothing about which one is nearer. Depth was lost the moment the world hit the sensor; only knowing <i>what</i> each object is (and so its real size) can bring it back.</div>
+      </div>
+    </div>
+    <div class="predict" data-p="s6a">
+      <div class="tag">Guess first!</div>
+      <div class="q">Going by box height alone, can one camera tell a 10 cm rubber duck at 1.2 m from a 25 cm Microduck at 3 m?</div>
+      <div class="opts"><button>Yes: the nearer one's box is taller</button><button data-right>No: both boxes are the same height</button><button>Yes: the bigger duck's box is taller</button></div>
+      <div class="why">No. 0.10 ÷ 1.2 = 0.25 ÷ 3 = 0.0833, the same ray slope, so both are f × 0.0833 = <b>88.8 px</b> tall in the frame (22.2 px in the input). Slide the rubber duck to 1.2 m and compare the cut-outs. The height alone is silent. A detector that learned what a Microduck looks like can break the tie by <i>recognising</i> it, which is the known-size cue: once you know which object it is, you know its real size.</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Two eyes: depth from disparity</h3>
+    <p class="lede">Two cameras a <span class="g" data-g="baseline">baseline</span> B apart see the same point at slightly different pixels. That shift is the <span class="g" data-g="disparity">disparity</span> d, and depth is Z = f·B ÷ d. The catch is in the derivative: one pixel of disparity error moves the depth by about Z² ÷ (f·B), so the error grows with the <b>square</b> of the distance. The course's numbers are the OAK-D Lite's: f = 452.9 px, B = 7.5 cm.</p>
+    <div class="pg">
+      <div class="panel">
+        <div class="lbl">Rig</div><div class="seg" id="s6rig" role="group" aria-label="Stereo rig preset"></div>
+        <div class="sl"><div class="sl-h"><span>Focal length f (px)</span><b id="s6sfv"></b></div><input type="range" id="s6sf" min="100" max="2000" step="0.1" value="452.9" aria-label="Focal length in pixels"></div>
+        <div class="sl"><div class="sl-h"><span>Baseline B (cm)</span><b id="s6sbv"></b></div><input type="range" id="s6sb" min="1" max="20" step="0.5" value="7.5" aria-label="Baseline in centimetres"></div>
+        <div class="sl"><div class="sl-h"><span>Distance Z (cm)</span><b id="s6szv"></b></div><input type="range" id="s6sz" min="30" max="400" step="0.05" value="94.35" aria-label="Distance in centimetres"></div>
+        <div class="grid g3">
+          <div class="stat"><div class="v acc" id="s6sd">–</div><div class="l">disparity d (px)</div></div>
+          <div class="stat"><div class="v" id="s6sZ">–</div><div class="l">Z back from d (cm)</div></div>
+          <div class="stat"><div class="v bad" id="s6se">–</div><div class="l">depth error per px of d</div></div>
+        </div>
+        <div class="mathbox" id="s6smath"></div>
+        <div class="callout co-i" id="s6srobot"></div>
+      </div>
+      <div>
+        <canvas id="s6srig" height="150" aria-label="Top view of the stereo rig"></canvas>
+        <canvas id="s6serr" class="s6chart" height="210" aria-label="Depth error per pixel of disparity against distance"></canvas>
+        <div class="chartcap"><span class="sw" style="background:#C8452F"></span>Z² ÷ (f·B), the depth error for one pixel of disparity · <span class="sw" style="background:#F4C430"></span>where your slider is · the two dots are the course's worked rows (94.35 cm and 3 m)</div>
+      </div>
+    </div>
+    <div class="predict" data-p="s6b">
+      <div class="tag">Guess first!</div>
+      <div class="q">Double the distance to the point. What happens to stereo's depth error per pixel of disparity?</div>
+      <div class="opts"><button>Same</button><button>About 2×</button><button data-right>About 4×</button></div>
+      <div class="why">About 4×: the error is Z² ÷ (f·B), so doubling Z quadruples it. The course's rows show it: 2.62 cm per pixel at 94 cm becomes 26.5 cm at 3 m, a 3.18× distance for a 10.1× error. Drag Z from 100 to 200 cm and read the red tag.</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>64 beams: the tape measure</h3>
+    <p class="lede">Microduck's ToF sensor ranges an <b>8 × 8</b> grid of zones over a <b>45° × 45°</b> square: 64 slant distances, once per scan. The robot's <code>kinematics/src/tof.rs</code> turns each zone into a point and then throws two kinds away: beams that reached the <span class="g" data-g="floorfilter">floor</span> (a head looking down sees floor at every range), and returns under about 10 cm, where cover-glass crosstalk makes phantoms. Drag the objects around the plan view. The grid on the right is what the sensor would publish, filtered as the code filters it.</p>
+    <div class="pg">
+      <div class="panel">
+        <div class="lbl">Row drawn in the plan view (row 0 is the top of the grid)</div><div class="seg" id="s6trow" role="group" aria-label="Which ToF row to draw"></div>
+        <div class="sl"><div class="sl-h"><span>Head pitch (+ is looking down)</span><b id="s6tpv"></b></div><input type="range" id="s6tp" min="-15" max="30" step="1" value="0" aria-label="Head pitch in degrees"></div>
+        <div class="btnrow"><button class="ghost" id="s6treset">Put the objects back</button></div>
+        <div class="grid g2">
+          <div class="stat"><div class="v good" id="s6thit">–</div><div class="l">zones that hit something</div></div>
+          <div class="stat"><div class="v" id="s6tfloor">–</div><div class="l">zones the code calls floor</div></div>
+          <div class="stat"><div class="v bad" id="s6tclose">–</div><div class="l">too close (&lt; 10 cm), dropped</div></div>
+          <div class="stat"><div class="v" id="s6tempty">–</div><div class="l">no return within 4 m</div></div>
+        </div>
+        <div class="mathbox" id="s6tmath"></div>
+        <div class="callout co-w"><b>Teaching model.</b> The beam table, the floor rule (range × downward part ≥ 0.85 × height) and the 10 cm cut are the code's. The sensor sitting 0.20 m above the floor, the objects as boxes, and the 4 m range cap are ours; the real code takes the sensor's pose from the head's forward kinematics and the trunk height from the robot model.</div>
+        <div class="callout co-i" id="s6trobot"></div>
+      </div>
+      <div>
+        <div class="s6two">
+          <div><canvas id="s6tplan" class="s6drag" height="330" aria-label="Plan view: drag the objects in front of the sensor"></canvas><div class="chartcap">Plan view, sensor at the bottom looking up the page. Drag the Microduck, the rubber duck or the box.</div></div>
+          <div><canvas id="s6tgrid" class="s6zonegrid" height="330" aria-label="The 8 by 8 ToF grid, one distance per zone"></canvas>
+            <div class="s6legend"><span><i style="background:#F4A25B"></i>hit, near</span><span><i style="background:#FFE9C7"></i>hit, far</span><span><i style="background:#9A9A9A"></i>floor</span><span><i style="background:#F4B7A7"></i>too close</span><span><i style="background:#FFFDF6"></i>no return</span></div>
+            <div class="chartcap">Numbers are horizontal distance in cm, which is what <code>Zone::Hit.range</code> carries. Click a row to draw it.</div></div>
+        </div>
+      </div>
+    </div>
+    <div class="predict" data-p="s6c">
+      <div class="tag">Guess first!</div>
+      <div class="q">At 3 m, how wide is one ToF zone (45° ÷ 8 = 5.625° each)?</div>
+      <div class="opts"><button>About 5 cm</button><button data-right>About 29 cm</button><button>About 1 m</button></div>
+      <div class="why">About 29 cm: 2 × 3 × tan(2.8125°) = 0.29 m. The 25 cm duck is <i>narrower than one zone</i> at that range, so the ToF can say "something at 3.0 m in column 5" but not "a duck". That is why the plan pairs it with the camera: <b>camera = direction, ToF = distance</b>. Drag the Microduck to the top of the plan view and count the columns it lights.</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Relative or metric? A depth net's blind spot</h3>
+    <p class="lede">A network can learn depth from one image, but most are trained with a loss that first normalises every depth map (subtract the median, divide by the mean absolute deviation). That makes the training data from a hundred cameras agree, and it makes the model blind to scale and shift. Drag the two sliders: whatever <span class="g" data-g="scaleshift">scale and shift</span> you apply, the loss stays zero.</p>
+    <div class="pg">
+      <div class="panel">
+        <div class="sl"><div class="sl-h"><span>Scale a</span><b id="s6rav"></b></div><input type="range" id="s6ra" min="0.5" max="5" step="0.5" value="3" aria-label="Prediction scale"></div>
+        <div class="sl"><div class="sl-h"><span>Shift b</span><b id="s6rbv"></b></div><input type="range" id="s6rb" min="-5" max="10" step="1" value="5" aria-label="Prediction shift"></div>
+        <div class="lbl">Prediction = a × truth + b, on three pixels whose true (inverse) depth is [1, 2, 4].</div>
+      </div>
+      <div>
+        <div class="s6rel" id="s6rel"></div>
+        <div class="callout co-i" style="margin-top:12px"><b>So what.</b> Depth Anything V2's general model is <i>relative</i>: it tells you the tree is in front of the house, not how many metres away either is. Metres need a domain fine-tune, a known-size object, a second eye, or a sensor that measures. Microduck's plan uses the sensor. Also: a metric fine-tune learned on one camera's focal length is off on another, which is the intrinsics TODO again.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Which duck? Fuse three senses to point the head at Jo</h3>
+    <p class="lede">Two identical Microducks are in view. The box desk found both and gave each a <span class="g" data-g="bearing">bearing</span>; it cannot say which is which. The tape measure gives a distance along each bearing. Jo's radio beacon says Jo is present, and how strong the signal is. Put the three together, click the box you think is Jo, set the neck crank, and turn the head.</p>
+    <div class="pg">
+      <div class="panel">
+        <div class="s6steps">
+          <div class="s6step" id="s6wcam"><b class="n">1</b><b>Camera</b> = direction. <span id="s6wcamt"></span></div>
+          <div class="s6step" id="s6wtof"><b class="n">2</b><b>ToF</b> = distance along each bearing. <div class="s6tofrow" id="s6wtofrow" aria-label="The ToF row: eight columns, distance in metres"></div><span id="s6wtoft"></span></div>
+          <div class="s6step" id="s6wble"><b class="n">3</b><b>BLE</b> = identity. <span id="s6wblet"></span></div>
+        </div>
+        <div class="lbl">Your pick: <b id="s6wpick" class="s6pick">click a box in the camera view</b></div>
+        <div class="sl"><div class="sl-h"><span>Neck crank (head yaw)</span><b id="s6wyv"></b></div><input type="range" id="s6wy" min="-20" max="20" step="0.1" value="0" aria-label="Head yaw in degrees, positive is right"></div>
+        <div class="btnrow"><button class="act" id="s6wgo">Turn the head</button><button class="ghost" id="s6wnew">New pair of ducks ↻</button></div>
+        <div class="mathbox" id="s6wmath"></div>
+        <div id="s6wres"></div>
+        <div class="callout co-i" id="s6wrobot"></div>
+        <div class="callout co-w"><b>Teaching model.</b> The two boxes come straight from the room's geometry (the box desk's job was steps 3 and 4). The beacon's "strong / weak signal" as a near / far hint is our toy: the plan only promises identity and presence from BLE, and radio strength is a rough cue at best.</div>
+      </div>
+      <div>
+        <div class="s6two">
+          <div><div class="frame s6frame"><canvas id="s6wcamv" width="252" height="448" aria-label="Camera view with two identical Microducks; click one" style="cursor:pointer"></canvas></div></div>
+          <div><canvas id="s6wplan" height="330" aria-label="Plan view of the head and the two ducks"></canvas><div class="chartcap">Plan view. The teal line is where the head looks; the green dot is Jo once you've found it.</div></div>
+        </div>
+      </div>
+    </div>
+    <div class="callout co-i" id="s6data"></div>
+    <div class="say" data-say="s6">
+      <div class="tag">Say it out loud</div>
+      <div class="line">One eye keeps the ray and loses the distance. Two eyes get it back from disparity, with an error that grows as Z². A depth net gets the shape but not the metres. Microduck's plan: measure distance with 64 beams, learn who is who from a radio beacon, and only ask the camera which way to look.</div>
+    </div>
+  </div>
+</section>
+<section id="cap" data-title="Bug Board">
+<style>
+#cap .reason{display:grid;gap:6px;margin:6px 0 10px}
+#cap .reason label{display:flex;gap:8px;align-items:flex-start;background:var(--sheet);border:2px solid var(--line);border-radius:8px;padding:7px 10px;font-size:15px;cursor:pointer}
+#cap .reason input{margin-top:5px;flex:none}
+#cap .checks{margin-top:8px}
+#cap .ev{display:grid;grid-template-columns:auto auto;gap:10px;justify-content:start;align-items:start;margin:8px 0}
+#cap .ev .frame{width:120px}
+#cap .ev .frame.sq{width:200px}
+#cap .ev .cap{font:400 14px/1.3 var(--hand);color:var(--soft);margin-top:4px;text-align:center}
+@media(max-width:480px){#cap .ev{grid-template-columns:1fr 1fr}#cap .ev .frame,#cap .ev .frame.sq{width:100%}}
+#cap .audit{background:var(--sheet);border:2px solid var(--line);border-radius:8px;padding:8px 10px;margin-top:10px}
+#cap .au{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:center;padding:5px 0;border-bottom:1.5px dotted rgba(74,46,30,.25);font:400 15px var(--hand)}
+#cap .au:last-child{border-bottom:0}
+#cap .au b{font:700 16px var(--sign)}
+#cap .au.red{background:#FBE3DC;border-radius:6px;margin:0 -6px;padding:5px 6px}
+#cap .au.grn{background:#E7F3DE;border-radius:6px;margin:0 -6px;padding:5px 6px}
+#cap .tg{display:flex;align-items:center;gap:10px;padding:8px 0 2px;font-size:15px}
+#cap .thermo{height:18px;border:2px solid var(--line);border-radius:9px;background:#F3EAD5;position:relative;overflow:hidden;margin-top:6px}
+#cap .thermo i{position:absolute;left:0;top:0;bottom:0;width:100%;transform-origin:left center;transform:scaleX(0);background:linear-gradient(90deg,#9BCB7E,#F4C430 60%,#C8452F);transition:transform .4s cubic-bezier(.16,1,.3,1)}
+#cap .thermo em{position:absolute;top:0;bottom:0;width:2px;background:var(--line)}
+#cap .verdict{margin-top:10px}
+#cap .stat .v{font-size:21px}
+</style>
+  <div class="card">
+    <div class="scene" data-art="cap"></div>
+    <h2>★ The bug board: three real bugs, fix them</h2>
+    <p class="lede">Three things that go wrong in Microduck's vision stack, each one a warning written into its own source. For each: read the evidence, turn the knobs, <b>re-run the real pipeline</b> (the same <code>detect → quantise → decode → AP</code> functions as the earlier steps, on the 40-frame held-out session), and name the cause. A case closes only when the behaviour is fixed <b>and</b> the fix is the right kind. Tempting wrong fixes are on the board too; they fail for a stated reason.</p>
+    <div class="row"><span class="stars" id="capstars">☆☆☆</span><span class="muted" id="capscore" style="font:16px var(--hand)"></span></div>
+    <div class="callout co-w" style="margin-top:12px"><b>Teaching model, exact tools.</b> The room and the detector's scores are the lab's toy (its clean AP50 of 0.979 is a toy number; the real model's held-out mAP50 is 0.976). The letterbox, decode + NMS, IoU, AP, the INT8 quantiser and the pinhole geometry are exact, so the <i>directions</i> every knob pushes are the real ones.</div>
+  </div>
+  <div class="card" id="cap1"></div>
+  <div class="card" id="cap2"></div>
+  <div class="card" id="cap3"></div>
+</section>
+<section id="ft" data-title="Field Test">
+<style>
+#ft .fq{padding:12px 0;border-bottom:2px dotted rgba(74,46,30,.25)}
+#ft .fq:last-child{border-bottom:0}
+#ft .fq .fqt{font-size:15.5px;margin-bottom:7px}
+#ft .fq .fqt b.stp{font:700 15px var(--sign);color:var(--brick-d)}
+#ft .fq .res{font:400 16px var(--hand);margin-left:8px}
+#ft .fq .res .why{color:var(--soft);font-size:14.5px;margin-left:6px}
+#ft .fq input[type=number]{width:150px}
+#ft .honest{padding-left:20px;display:grid;gap:8px;font-size:15.5px}
+#ft .honest b{color:var(--brick-d)}
+#ft .motto{font:700 20px/1.3 var(--sign);color:var(--ink);margin:14px 0 6px}
+#ft .srcs{font-size:15px;color:var(--soft);margin-top:10px}
+#ft .srcs b{color:var(--ink)}
+#ft .srcs ul{padding-left:20px;display:grid;gap:4px;margin-top:4px}
+</style>
+  <div class="card">
+    <h2>✓ Field test</h2>
+    <p class="lede">Eight questions. Answer each by <b>operating the widget in the step named</b>, not from memory: set its controls to the values in the question and read the number off the page. Numeric answers have a tolerance. Six or more earns the check.</p>
+    <div id="ftqs"></div>
+    <div class="btnrow"><button class="act" id="ftgo">Grade me</button><span id="ftscore" style="font:18px var(--hand);align-self:center"></span></div>
+  </div>
+  <div class="card">
+    <h3>What's exact here, and what's a teaching model</h3>
+    <ul class="honest">
+      <li><b>Exact:</b> the letterbox geometry and pixel sampling, decode + greedy NMS, ported line for line from duck-detect's <code>lib.rs</code>; IoU, precision, recall and AP (all-point and 101-point); affine INT8 quantisation (scale, zero point, per-tensor vs per-channel); convolution, its output size and parameter counts; the pinhole camera, field of view and stereo maths; the ToF beam table and its floor and too-close filters; and every robot fact, pinned to <code>pollen-robotics/microduck @ 590b986</code> with its source line.</li>
+      <li><b>Teaching models:</b> the toy room and its objects; the detector's synthesised scores (the <code>[1, 5, 2100]</code> layout and the three grids are real, the numbers are not yolo11n's, and its 0.979 is a toy AP); the thermal curve (only the 95 °C / 408 MHz flat-out anchor is real); the camera and sensor sitting 0.20 m above the floor; which sensor mode the camera runs (we assume the widest full-width crop; the 1080p crop is hypothetical) and what the placeholder intrinsics are (we assume 62° across the width); the duck-head stereo rig; and the ToF + BLE fusion toy, including "strong signal = near".</li>
+      <li class="motto">"The directions are real; the numbers are a toy's."</li>
+    </ul>
+    <div class="srcs"><b>Sources.</b>
+      <ul>
+        <li><a href="https://huggingface.co/learn/computer-vision-course" target="_blank" rel="noopener">Hugging Face Community Computer Vision Course</a>: Units 1 (fundamentals, pre-processing), 2 (CNNs), 3 (transformers, distillation), 6 (detection, IoU, mAP, YOLO), 8 (camera geometry, stereo, monocular depth), 9 (model optimisation, INT8), and one line of 10 (synthetic data).</li>
+        <li><a href="https://github.com/pollen-robotics/microduck" target="_blank" rel="noopener">pollen-robotics/microduck</a> @ 590b986 (Apache-2.0): <code>duck-detect/src/lib.rs</code>, <code>deploy/robotd.toml</code>, <code>docs/project/npu-bringup.md</code>, <code>docs/ideas/autonomous_behavior.md</code>, <code>kinematics/src/tof.rs</code>.</li>
+        <li><a href="https://docs.ultralytics.com/models/yolo11/" target="_blank" rel="noopener">Ultralytics YOLO11</a>, the detector family Microduck's yolo11n comes from.</li>
+        <li>Further reading: <a href="https://poloclub.github.io/cnn-explainer/" target="_blank" rel="noopener">CNN Explainer</a> for convolution layer by layer, and Setosa's <a href="https://setosa.io/ev/image-kernels/" target="_blank" rel="noopener">Image Kernels</a> for sliding a stencil by hand.</li>
+      </ul>
+    </div>
+    <div class="btnrow" style="margin-top:14px"><button class="ghost" id="reset">Reset all progress</button></div>
+  </div>
+</section>
+
+</div>
+<div id="tip" role="tooltip"></div>
+<footer>Duck's-Eye View · an unofficial companion to the Hugging Face Computer Vision Course · real pipeline math, toy room · <a href="https://github.com/bakulbadwal/ducks-eye-view" style="color:#DDF3F4">source</a></footer>
+
+<script src="js/core.js?v=202609252257"></script>
+<script src="js/microduck.js?v=202609252257"></script>
+<script src="js/glossary.js?v=202609252257"></script>
+<script src="js/art/icons.js?v=202609252257"></script>
+<script src="js/art/s0.js?v=202609252257"></script>
+<script src="js/art/s1.js?v=202609252257"></script>
+<script src="js/art/s2.js?v=202609252257"></script>
+<script src="js/art/s3.js?v=202609252257"></script>
+<script src="js/art/s4.js?v=202609252257"></script>
+<script src="js/art/s5.js?v=202609252257"></script>
+<script src="js/art/s6.js?v=202609252257"></script>
+<script src="js/art/cap.js?v=202609252257"></script>
+<script src="js/framework.js?v=202609252257"></script>
+<script src="js/steps/s0.js?v=202609252257"></script>
+<script src="js/steps/s1.js?v=202609252257"></script>
+<script src="js/steps/s2.js?v=202609252257"></script>
+<script src="js/steps/s3.js?v=202609252257"></script>
+<script src="js/steps/s4.js?v=202609252257"></script>
+<script src="js/steps/s5.js?v=202609252257"></script>
+<script src="js/steps/s6.js?v=202609252257"></script>
+<script src="js/steps/cap.js?v=202609252257"></script>
+<script src="js/steps/ft.js?v=202609252257"></script>
+<script>DEV.boot();</script>
+</body>
+</html>
