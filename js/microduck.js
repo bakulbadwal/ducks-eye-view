@@ -21,7 +21,8 @@ window.DEV_MICRODUCK = {
     planar:      { v: "the tensor is [1, 5, N]: all cx, then all cy, … not five numbers per box", src: "duck-detect/src/lib.rs:241-243" },
     iouLimit:    { v: "NMS keeps a box only if its IoU with every kept box is below 0.5", src: "duck-detect/src/lib.rs:266-276; bin/duck-bench.rs:189" },
     bearing:     { v: "bearing = (box centre x ÷ frame width)·2 − 1: −1 hard left, 0 ahead, +1 hard right", src: "duck-detect/src/lib.rs:45-52" },
-    training:    { v: "150 frames from three sessions, mAP50 0.976 on a held-out session", src: "docs/project/npu-bringup.md:7-8" },
+    training:    { v: "the first model: 150 frames from three sessions, mAP50 0.976 on a held-out session", src: "docs/project/npu-bringup.md:7-8" },
+    laterRun:    { v: "a later public run, trained on five sessions and tested on a harder held-out session (an office in the afternoon): mAP50 0.80, precision 0.96, recall 0.68", src: "Hugging Face model card: pollen-robotics/microduck-duck-detector, runs/duck/summary.json", url: "https://huggingface.co/pollen-robotics/microduck-duck-detector/blob/main/runs/duck/summary.json" },
     int8:        { v: "3.9 MB after INT8 quantisation; kept 2 of 2 detections at 95% box overlap vs the float model", src: "docs/project/npu-bringup.md:8-9" },
     npu:         { v: "RK3566 NPU: 0.8 TOPS INT8, one core", src: "docs/project/npu-bringup.md:3" },
     latency:     { v: "p50 25.7 ms / p95 58.4 ms, inference plus decode", src: "docs/project/npu-bringup.md:88" },
@@ -37,5 +38,9 @@ window.DEV_MICRODUCK = {
     tofReproject:{ v: "zones → points in the trunk frame through the head's forward kinematics; floor hits and returns under ~10 cm dropped", src: "kinematics/src/tof.rs:1-22" },
     walking:     { v: "the walking policy's observations are proprioceptive (joints, IMU, gravity); it never sees the camera", src: "microduck_rl @ d424a0c README; docs/project/roadmap.md:89" }
   },
-  cite: function (key) { var f = this.facts[key]; return f ? '<a class="src" href="' + this.repo + '/blob/' + this.commit + '/' + f.src.split(":")[0].split(" ")[0] + '" target="_blank" rel="noopener">' + f.src + "</a>" : ""; }
+  cite: function (key) {
+    var f = this.facts[key]; if (!f) return "";
+    var href = f.url || (this.repo + "/blob/" + this.commit + "/" + f.src.split(":")[0].split(" ")[0]);
+    return '<a class="src" href="' + href + '" target="_blank" rel="noopener">' + f.src + "</a>";
+  }
 };

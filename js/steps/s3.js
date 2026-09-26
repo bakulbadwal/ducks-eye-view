@@ -297,7 +297,7 @@ DEV.step("s3", function (ui, core) {
   function initW4() {
     ui.range("s3rthr", function () { w4.thr = +$("s3rthr").value; w4render(); touch(); });
     $("s3hn").onchange = function () { w4.hn = $("s3hn").checked; w4render(); touch(); };
-    $("s3rcite").innerHTML = "<b>On the robot.</b> The real model: " + MD.facts.training.v + " (" + MD.cite("training") + "). “Held out” means the test frames come from a recording session the model never trained on: same room and light within a session, so a random frame split would grade memory, not sight. The doc doesn't say whether 0.976 was the float or the INT8 model, or whether the held-out session had any look-alikes in it.";
+    $("s3rcite").innerHTML = "<b>On the robot.</b> The real model, " + MD.facts.training.v + " (" + MD.cite("training") + "). “Held out” means the test frames come from a recording session the model never trained on: same room and light within a session, so a random frame split would grade memory, not sight. The doc doesn't say whether 0.976 was the float or the INT8 model, or whether the held-out session had any look-alikes in it. Then " + MD.facts.laterRun.v + " (" + MD.cite("laterRun") + "). Same architecture, a harder room, and the number drops. Precision slips a little (0.997 → 0.96, per the first run's own summary on the same card) while recall falls hard (0.94 → 0.68): it misses ducks rather than inventing them. A mAP is a statement about one test session, never about the model alone.";
   }
 
   /* ================= Widget 5 · Read the tensor right ================= */

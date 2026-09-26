@@ -12,7 +12,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Andika:wght@400;700&family=Grandstander:wght@700;800&family=Patrick+Hand&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="css/styles.css?v=202609252257">
+<link rel="stylesheet" href="css/styles.css?v=202609261305">
 </head>
 <body>
 <!--
@@ -819,7 +819,7 @@ HONESTY: the pipeline math is exact and ported from the real code (letterbox, de
   <canvas id="s4pr" height="220" style="margin-top:10px" aria-label="Precision-recall curves for the three modes"></canvas>
   <div class="chartcap">Precision against recall as the inspector walks down the ranked list. Float and per-channel lie on top of each other. Per-tensor can't rank: every survivor scores one notch (1.25 to 1.27 here, because the toy measures each frame's range; a real export fixes one scale), so the order comes from grid position, not confidence, and the curve stair-steps.</div>
   <div class="callout co-i" id="s4apnote"></div>
-  <div class="callout co-w"><b>Teaching model.</b> The scene, the detector and its scores are ours (the real yolo11n scored mAP50 <b>0.976</b> on its own held-out session · <span class="s4-src" data-cite="training"></span>). The quantisation, decode, NMS, IoU and AP arithmetic are exact. The <b>0.979</b> is a toy number that happens to sit near the real one.</div>
+  <div class="callout co-w"><b>Teaching model.</b> The scene, the detector and its scores are ours (the real yolo11n's first run scored mAP50 <b>0.976</b> on its own held-out session · <span class="s4-src" data-cite="training"></span>). The quantisation, decode, NMS, IoU and AP arithmetic are exact. The <b>0.979</b> is a toy number that happens to sit near the real one.</div>
   <div class="callout co-i"><b>Why the ranking is lost, and why precision can even look better.</b> NMS and the inspector both sort by score. With every real detection reading exactly one notch, the sort has nothing to sort: <span class="g" data-g="tie">ties</span> stay in grid order, so the box that survives is whichever cell came first, not the most confident one. Meanwhile the weak look-alikes (a rubber duck at 0.4–0.6) round to <b>0</b> and disappear, so precision at 0.35 can rise while AP falls. Toggle per-channel and the score row gets its own ruler (one notch ≈ 0.004): the scores, the ranking and the AP all come back.</div>
   <div class="callout co-i"><b>On the robot.</b> <span data-fact="threshold"></span> · <span class="s4-src" data-cite="threshold"></span>. The bring-up doc's float-vs-INT8 check: <span data-fact="int8"></span> · <span class="s4-src" data-cite="int8"></span>. Two detections is a <b>smoke test, not a benchmark</b>; a fuller check would compare float and INT8 AP on the held-out session, which is what the card above does for the toy. Box coordinates survive the shared ruler because half a notch is ≈0.63 px in the 320 input, about 2.5 px in the 1280-px frame: small next to a duck.</div>
   <div class="predict" data-p="s4a">
@@ -1255,7 +1255,7 @@ HONESTY: the pipeline math is exact and ported from the real code (letterbox, de
     <h2>★ The bug board: three real bugs, fix them</h2>
     <p class="lede">Three things that go wrong in Microduck's vision stack, each one a warning written into its own source. For each: read the evidence, turn the knobs, <b>re-run the real pipeline</b> (the same <code>detect → quantise → decode → AP</code> functions as the earlier steps, on the 40-frame held-out session), and name the cause. A case closes only when the behaviour is fixed <b>and</b> the fix is the right kind. Tempting wrong fixes are on the board too; they fail for a stated reason.</p>
     <div class="row"><span class="stars" id="capstars">☆☆☆</span><span class="muted" id="capscore" style="font:16px var(--hand)"></span></div>
-    <div class="callout co-w" style="margin-top:12px"><b>Teaching model, exact tools.</b> The room and the detector's scores are the lab's toy (its clean AP50 of 0.979 is a toy number; the real model's held-out mAP50 is 0.976). The letterbox, decode + NMS, IoU, AP, the INT8 quantiser and the pinhole geometry are exact, so the <i>directions</i> every knob pushes are the real ones.</div>
+    <div class="callout co-w" style="margin-top:12px"><b>Teaching model, exact tools.</b> The room and the detector's scores are the lab's toy (its clean AP50 of 0.979 is a toy number; the real model's first run scored a held-out mAP50 of 0.976, a later run on a harder session 0.80). The letterbox, decode + NMS, IoU, AP, the INT8 quantiser and the pinhole geometry are exact, so the <i>directions</i> every knob pushes are the real ones.</div>
   </div>
   <div class="card" id="cap1"></div>
   <div class="card" id="cap2"></div>
@@ -1306,28 +1306,28 @@ HONESTY: the pipeline math is exact and ported from the real code (letterbox, de
 <div id="tip" role="tooltip"></div>
 <footer>Duck's-Eye View · an unofficial companion to the Hugging Face Computer Vision Course · real pipeline math, toy room · <a href="https://github.com/bakulbadwal/ducks-eye-view" style="color:#DDF3F4">source</a></footer>
 
-<script src="js/core.js?v=202609252257"></script>
-<script src="js/microduck.js?v=202609252257"></script>
-<script src="js/glossary.js?v=202609252257"></script>
-<script src="js/art/icons.js?v=202609252257"></script>
-<script src="js/art/s0.js?v=202609252257"></script>
-<script src="js/art/s1.js?v=202609252257"></script>
-<script src="js/art/s2.js?v=202609252257"></script>
-<script src="js/art/s3.js?v=202609252257"></script>
-<script src="js/art/s4.js?v=202609252257"></script>
-<script src="js/art/s5.js?v=202609252257"></script>
-<script src="js/art/s6.js?v=202609252257"></script>
-<script src="js/art/cap.js?v=202609252257"></script>
-<script src="js/framework.js?v=202609252257"></script>
-<script src="js/steps/s0.js?v=202609252257"></script>
-<script src="js/steps/s1.js?v=202609252257"></script>
-<script src="js/steps/s2.js?v=202609252257"></script>
-<script src="js/steps/s3.js?v=202609252257"></script>
-<script src="js/steps/s4.js?v=202609252257"></script>
-<script src="js/steps/s5.js?v=202609252257"></script>
-<script src="js/steps/s6.js?v=202609252257"></script>
-<script src="js/steps/cap.js?v=202609252257"></script>
-<script src="js/steps/ft.js?v=202609252257"></script>
+<script src="js/core.js?v=202609261305"></script>
+<script src="js/microduck.js?v=202609261305"></script>
+<script src="js/glossary.js?v=202609261305"></script>
+<script src="js/art/icons.js?v=202609261305"></script>
+<script src="js/art/s0.js?v=202609261305"></script>
+<script src="js/art/s1.js?v=202609261305"></script>
+<script src="js/art/s2.js?v=202609261305"></script>
+<script src="js/art/s3.js?v=202609261305"></script>
+<script src="js/art/s4.js?v=202609261305"></script>
+<script src="js/art/s5.js?v=202609261305"></script>
+<script src="js/art/s6.js?v=202609261305"></script>
+<script src="js/art/cap.js?v=202609261305"></script>
+<script src="js/framework.js?v=202609261305"></script>
+<script src="js/steps/s0.js?v=202609261305"></script>
+<script src="js/steps/s1.js?v=202609261305"></script>
+<script src="js/steps/s2.js?v=202609261305"></script>
+<script src="js/steps/s3.js?v=202609261305"></script>
+<script src="js/steps/s4.js?v=202609261305"></script>
+<script src="js/steps/s5.js?v=202609261305"></script>
+<script src="js/steps/s6.js?v=202609261305"></script>
+<script src="js/steps/cap.js?v=202609261305"></script>
+<script src="js/steps/ft.js?v=202609261305"></script>
 <script>DEV.boot();</script>
 </body>
 </html>

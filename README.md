@@ -81,7 +81,7 @@ node tests/core.test.js
   - Microduck's facts, pinned to [`590b986`](https://github.com/pollen-robotics/microduck/tree/590b986).
 - **Teaching models, labelled on the page:**
   - the synthetic room;
-  - the detector's scores: a stand-in that fills the real `[1, 5, 2100]` layout, not yolo11n. Its 0.979 AP50 on the toy session is a toy number beside the real model's 0.976;
+  - the detector's scores: a stand-in that fills the real `[1, 5, 2100]` layout, not yolo11n. Its 0.979 AP50 on the toy session is a toy number beside the real model's 0.976 (its first run; a later public run tested on a harder held-out session scored 0.80);
   - the thermal curve (only "95 °C and 408 MHz flat out" comes from the repo);
   - a camera height of 0.20 m;
   - the BLE signal-strength hint.
