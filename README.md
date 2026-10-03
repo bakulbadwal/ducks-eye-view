@@ -6,6 +6,10 @@
 
 ![Duck's-Eye View: a Busytown-style cutaway of a robot duck's head, where every room is one step of the vision pipeline](docs/hero.png)
 
+![The shredder clerk at work: twenty notes on one duck, greedy NMS keeps the top one and shreds the nineteen that overlap it](docs/linkedin/ducks-eye-view-carousel.gif)
+
+*Step 3, the shredder: 20 candidates pass the gate, greedy NMS keeps one.*
+
 The robot is **Microduck**, a 25 cm open-source robot duck ([pollen-robotics/microduck](https://github.com/pollen-robotics/microduck)). Its head camera feeds a tiny YOLO detector on an 8-bit NPU that finds *other* Microducks and turns the head toward them.
 
 Here the head is drawn as a workshop staffed by ducklings in hard hats:

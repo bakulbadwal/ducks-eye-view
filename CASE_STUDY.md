@@ -4,7 +4,7 @@
 Five hands-on labs, one per Hugging Face course I'm working through. Each turns a course's hardest ideas into something you operate rather than read: widgets run the real math, and every toy is labelled as one.
 
 **The series:**
-- **[Arm Playground](https://github.com/bakulbadwal/arm-playground)**: Robotics Course, Unit 2. Kinematics, configuration space, the Jacobian and feedback control, on a two-joint arm with 23 guided lessons.
+- **[Arm Playground](https://github.com/bakulbadwal/arm-playground)**: Robotics Course, Unit 2. Kinematics, configuration space, the Jacobian and feedback control, on a two-joint arm with 24 guided lessons.
 - **[Policy Pond](https://github.com/bakulbadwal/policy-pond)**: Deep RL Course. Real REINFORCE and PPO in the browser, and reward hacking taken from a real robot's training playbook.
 - **[Duck's-Eye View](https://github.com/bakulbadwal/ducks-eye-view)**: Computer Vision Course. One camera frame through a real robot's vision stack, from the letterbox to YOLO's 2,100 boxes, INT8 and the pinhole camera.
 - **[Fork in the Road](https://github.com/bakulbadwal/fork-in-the-road)**: Diffusion Models Course. Why robots use diffusion to choose actions, with the real DDPM/DDIM math.
