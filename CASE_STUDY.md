@@ -78,4 +78,4 @@ The honest version: these are local-first with no telemetry, so today I can't se
 
 - **More courses as they release:** Robotics Units 5–7 (reinforcement learning, imitation learning, foundation models) are still "coming soon" upstream.
 - **A series landing page** linking the labs in study order, with one shared progress view.
-- **Close the loop with the real robot:** the Duck's-Eye View bug board already mirrors Microduck's actual deployment bugs. The natural next lab is calibrating the robot's camera intrinsics, a real open TODO in its repo.
+- **Close the loop with the real robot:** the Duck's-Eye View bug board already mirrors Microduck's actual deployment bugs. The natural next lab was calibrating the robot's camera intrinsics. *Built 2026-10-15 as [Eye Exam](eye-exam/); by then Microduck had shipped its own calibration (648bf22), which the lab uses as its answer key, and which shows step 5's centred pinhole is about 6° off.*

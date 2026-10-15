@@ -62,6 +62,12 @@ None follows one frame through a **deployed** robot's pipeline. Duck's-Eye View 
 
 For convolution on its own, CNN Explainer is better than anything here. Read it after step 2.
 
+## The sequel: Eye Exam
+
+Step 5 takes the camera's intrinsics as given. [**Eye Exam**](https://bakulbadwal.github.io/ducks-eye-view/eye-exam/) ([source and docs](eye-exam/)) measures them: Microduck goes to the optician, and Zhang's method (the one inside OpenCV's `calibrateCamera`) runs for real in the browser, from one photo's homography to the closed-form K, lens distortion and Levenberg–Marquardt refinement, with Microduck's own calibration as the answer key.
+
+**An update to step 5, found while building it:** when this lab was built (microduck @ 590b986) the robot's intrinsics were a placeholder, so step 5 assumes a centred pinhole with f = 1065 px. Microduck's repo has since shipped a real solve (648bf22, 80 views, 0.79 px RMS) whose principal point sits well off the frame's centre; against it, the centred pinhole is off by about 6° in bearing. Step 5's lesson (a spec-sheet field of view over-turns the head) still stands; its "calibrated" numbers are the old design figures. Eye Exam's step 6 shows the difference.
+
 ## Run it
 
 Play it live at the link above, or open `index.html` in a browser. There's no build step, no dependencies, and nothing to install.

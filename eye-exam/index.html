@@ -1,0 +1,451 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Eye Exam</title>
+<meta name="description" content="A hands-on lab for how a robot's camera gets calibrated: homographies by DLT, Zhang's closed form, lens distortion and Levenberg–Marquardt refinement, run in the browser on seeded photos of a checkerboard seen through Microduck's real calibrated camera.">
+<meta property="og:title" content="Eye Exam: how a robot's camera gets calibrated">
+<meta property="og:description" content="The duck goes to the optician. Photograph a checkerboard, find its homography, count the clues, solve Zhang's closed form, turn the lens dial, refine with Levenberg–Marquardt, and see what a bad prescription costs the duck in degrees of head turn.">
+<meta property="og:image" content="https://bakulbadwal.github.io/ducks-eye-view/eye-exam/docs/hero.png">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect x='4' y='10' width='56' height='44' rx='6' fill='%23FFFDF6' stroke='%234A2E1E' stroke-width='4'/%3E%3Cpath d='M10 16h11v11H10zM32 16h11v11H32zM21 27h11v11H21zM43 27h11v11H43zM10 38h11v11H10zM32 38h11v11H32z' fill='%233A2418'/%3E%3Ccircle cx='46' cy='44' r='12' fill='%231F7A7A' stroke='%234A2E1E' stroke-width='3'/%3E%3Ccircle cx='46' cy='44' r='5' fill='%23CDEBE6'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Andika:wght@400;700&family=Grandstander:wght@700;800&family=Patrick+Hand&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+<!--
+THESIS: Duck's-Eye View turned a pixel into a head turn with the camera's intrinsics taken as given. This lab measures them, the way OpenCV's calibrateCamera does: photograph a flat checkerboard at several angles, find each photo's homography, use the fact that a rotation's columns are perpendicular and equally long to pin down B = K⁻ᵀK⁻¹, read K out of it, add the lens's radial distortion, and refine everything by Levenberg–Marquardt on the reprojection error. Drawn as a Busytown optician's shop where the duck gets its eyes tested. Sibling of Inference Kitchen, Policy Pond, Fork in the Road, Duck's-Eye View and Wet Paint.
+OWN-WORLD: flat gouache on paper; warm-brown outlines; an optician's teal masthead; Grandstander signboards, Patrick Hand labels, Andika body; painted-sign buttons, price-tag readouts, sticky-note predictions, chalkboard takeaways, and a prescription card for every estimate.
+HONESTY: the DLT, Hartley normalisation, Zhang's V b = 0 and App. B, the extrinsics, the linear distortion fit (eq. 13), Levenberg–Marquardt on eq. 14, the reprojection RMS and the bearing → angle geometry are the real math. The photos are synthetic: a seeded 9 × 6 checkerboard seen through a known camera (Microduck's published calibration, k1 and k2 only), with Gaussian corner noise standing in for a corner detector.
+-->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false"><defs><filter id="gouache" x="-2%" y="-2%" width="104%" height="104%"><feTurbulence type="fractalNoise" baseFrequency=".045" numOctaves="2" seed="3" result="w"/><feDisplacementMap in="SourceGraphic" in2="w" scale="1.3" xChannelSelector="R" yChannelSelector="G"/></filter></defs></svg>
+<div class="wrap">
+<header>
+  <div class="mast"><b><span class="mi" aria-hidden="true"></span>Eye Exam</b><span>a hands-on lab</span></div>
+  <div><h1>How a robot's camera gets calibrated</h1>
+  <p class="sub">Microduck goes to the optician. A checkerboard is the eye chart, every photo of it held at a new angle is one view, the lens dial is the distortion model, and the prescription card is the camera matrix K. You'll measure the numbers <a href="https://bakulbadwal.github.io/ducks-eye-view/#/s5">Duck's-Eye View</a> took as given, with Zhang's method, the one inside OpenCV's <code>calibrateCamera</code>, running for real in your browser. About 70 minutes of play.</p></div>
+</header>
+
+<nav id="nav" aria-label="Steps"></nav>
+
+<!-- ============ STEP 0 ============ -->
+<section id="s0" data-title="The Exam Room" data-n="0">
+  <div class="card">
+    <div class="scene" data-art="s0"></div>
+    <h2>0 · The exam room: what the prescription card holds</h2>
+    <p class="lede">A camera turns a direction into a pixel. In Duck's-Eye View's <a href="https://bakulbadwal.github.io/ducks-eye-view/#/s5">map room</a> you dragged a duck around and watched the <span class="g" data-g="pinhole">pinhole</span> put it in the frame; there the camera's numbers were given. Here they're the unknowns. The <span class="g" data-g="intrinsics">intrinsics</span> are five numbers in a 3 × 3 matrix <span class="g" data-g="K">K</span>, plus two for the lens. Calibration finds them from photos of something whose shape you know exactly. Every term with a wavy red underline is tappable.</p>
+    <div class="kmap">
+      <div><span class="k" data-i="duck" aria-hidden="true"></span><b>The duck</b> = the camera being calibrated<br><span class="t">Microduck's head camera, 1280 × 720</span></div>
+      <div><span class="k" data-i="chart" aria-hidden="true"></span><b>The eye chart</b> = a checkerboard<br><span class="t">9 × 6 inner corners, 25 mm squares</span></div>
+      <div><span class="k" data-i="photo" aria-hidden="true"></span><b>A photo</b> = one <span class="g" data-g="view">view</span><br><span class="t">the chart held at a new angle</span></div>
+      <div><span class="k" data-i="magnifier" aria-hidden="true"></span><b>The magnifier</b> = the corner detector<br><span class="t">finds corners to a fraction of a pixel</span></div>
+      <div><span class="k" data-i="trace" aria-hidden="true"></span><b>The tracing card</b> = a <span class="g" data-g="homography">homography</span><br><span class="t">chart → photo, one per view (step 1)</span></div>
+      <div><span class="k" data-i="tally" aria-hidden="true"></span><b>The clue tally</b> = constraints on K<br><span class="t">two per photo (step 2)</span></div>
+      <div><span class="k" data-i="card" aria-hidden="true"></span><b>The prescription card</b> = K<br><span class="t">fx, fy, cx, cy, skew (step 3)</span></div>
+      <div><span class="k" data-i="dial" aria-hidden="true"></span><b>The lens dial</b> = <span class="g" data-g="distortion">distortion</span><br><span class="t">k1 and k2 (step 4)</span></div>
+      <div><span class="k" data-i="onetwo" aria-hidden="true"></span><b>"Better one, or two?"</b> = refinement<br><span class="t"><span class="g" data-g="lm">Levenberg–Marquardt</span> (step 5)</span></div>
+    </div>
+    <p class="covers">Covers <b>Zhang (2000) §2</b>: the pinhole s·m = K[R t]M · <b>OpenCV</b> <code>calibrateCamera</code>: fx, fy, cx, cy and distortion coefficients · <b>Duck's-Eye View step 5</b>: where these numbers get used</p>
+  </div>
+
+  <div class="card" data-shot>
+    <h3>The duck looks at the chart</h3>
+    <p class="lede">This is the duck's view: the 1280 × 720 frame its camera sends, unrotated. Tilt and turn the chart, move it nearer or further, and switch the lens on and off. The hollow circles show where a perfect pinhole would put each corner; the dots are where the real lens puts them.</p>
+    <div class="ctl">
+      <div class="sl"><div class="sl-h"><span>tilt</span><b id="s0tv">30°</b></div><input type="range" id="s0t" min="0" max="65" step="1" value="30" aria-label="Chart tilt in degrees"></div>
+      <div class="sl"><div class="sl-h"><span>tilt direction</span><b id="s0av">30°</b></div><input type="range" id="s0a" min="0" max="355" step="5" value="30" aria-label="Direction of the tilt axis in degrees"></div>
+      <div class="sl"><div class="sl-h"><span>distance</span><b id="s0dv">450 mm</b></div><input type="range" id="s0d" min="350" max="1200" step="10" value="450" aria-label="Distance in millimetres"></div>
+      <div><label class="tg"><input type="checkbox" id="s0lens" checked><span class="sw"></span>Microduck's lens</label><label class="tg"><input type="checkbox" id="s0pin" checked><span class="sw"></span>show the pinhole's corners</label></div>
+    </div>
+    <canvas id="s0c" class="frame" aria-label="The camera frame, 1280 by 720, with the checkerboard eye chart"></canvas>
+    <div class="legend"><span><span class="dot" style="background:#F4C430"></span>a corner, as the camera sees it</span><span><span class="ring"></span>where a perfect pinhole puts it</span><span><span class="x" style="color:#A5321F">+</span>the principal point (cx, cy)</span><span><span class="x" style="color:#6E5040">+</span>the frame's middle</span></div>
+    <div class="grid g4">
+      <div class="stat"><div class="v" id="s0w">–</div><div class="l">top row, end to end</div></div>
+      <div class="stat"><div class="v" id="s0shift">–</div><div class="l">furthest the lens moved a corner</div></div>
+      <div class="stat"><div class="v" id="s0bend">–</div><div class="l">top row's bend from straight</div></div>
+      <div class="stat"><div class="v" id="s0z">–</div><div class="l">chart's middle, distance</div></div>
+    </div>
+    <div class="mathbox" id="s0m"></div>
+    <div class="rx" id="s0card"></div>
+    <div class="key"><b>The answer key.</b> This lab's camera is Microduck's own calibration, as its repo ships it (<a href="https://github.com/pollen-robotics/microduck/blob/648bf22/robotd-params/src/lib.rs" target="_blank" rel="noopener">robotd-params/src/lib.rs, <code>CameraIntrinsics::alpha</code></a>): "Solved on unit graphite, 2026-09-08 — ChArUco board on a screen …, 80 views, 0.79 px RMS, on the 1280×720 frame as mediad sends it (unrotated)." We round it and keep Zhang's two radial terms, k1 and k2; the real solve also has two tangential terms and a k3, which together move a frame-corner pixel by up to 19 px. Every photo in this lab is drawn through this camera, so every estimate can be checked against it. The solver never sees it.</div>
+    <div class="predict" data-p="s0a">
+      <div class="tag">Guess first!</div>
+      <div class="q">The principal point is where the optical axis hits the sensor. On Microduck's 1280 × 720 frame, where is it?</div>
+      <div class="opts"><button>Dead centre, (639.5, 359.5)</button><button>A pixel or two off centre</button><button data-right>43 px left of centre and 115 px below it</button></div>
+      <div class="why">(596.78, 474.52): 42.7 px left and 115.0 px down. The repo's own comment says it plainly: "the principal point is <i>assumed</i> central — which is the part a real calibration corrects (the measured <code>cy</code> sits ~110 px low)" (<a href="https://github.com/pollen-robotics/microduck/blob/648bf22/mediad/src/camera.rs" target="_blank" rel="noopener">mediad/src/camera.rs</a>). You can't know it without calibrating.</div>
+    </div>
+    <div class="predict" data-p="s0b">
+      <div class="tag">Guess first!</div>
+      <div class="q">Lens off, chart square-on to the camera at 400 mm. Its top row of corners is 200 mm long. How many pixels across?</div>
+      <div class="opts"><button>About 200</button><button data-right>About 531</button><button>About 1,062</button></div>
+      <div class="why">fx · 200 / 400 = 1061.81 / 2 = <b>530.9 px</b>: a pixel offset is the focal length times the ray's slope. Switch the lens on and the same row shrinks to 515.5 px, because a barrel lens pulls everything towards the middle. Set tilt 0 and distance 400 to read it off.</div>
+    </div>
+    <div class="say" data-say="s0">
+      <div class="tag">Say it out loud</div>
+      <div class="line">Intrinsics turn a direction into a pixel: focal lengths fx and fy in pixels, the principal point (cx, cy) where the optical axis lands, a skew, and the lens's own bend, k1 and k2. Calibration measures them from photos of a pattern whose shape you know.</div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ STEP 1 ============ -->
+<section id="s1" data-title="One Photo" data-n="1">
+  <div class="card">
+    <div class="scene" data-art="s1"></div>
+    <h2>1 · One photo: the tracing card</h2>
+    <p class="lede">The chart is flat, so put it at Z = 0. Then a pinhole maps every chart point (X, Y) to its pixel through one 3 × 3 matrix: s·[u, v, 1]ᵀ = H·[X, Y, 1]ᵀ, with <b>H = K [r1 r2 t]</b> (Zhang's eq. 2). That's a <span class="g" data-g="homography">homography</span>: 9 numbers, but only 8 matter because its scale is free. Each corner gives two equations, so the 54 corners give a 108 × 9 matrix L with L·h = 0, and the best h is the singular vector of L's smallest <span class="g" data-g="svd">singular value</span>. That's the <span class="g" data-g="dlt">direct linear transform</span>. Steps 1 to 3 photograph the chart with the lens dial at 0, so a homography is exact; step 4 puts the lens back.</p>
+    <p class="covers">Covers <b>Zhang App. A</b>: the 2n × 9 system L x = 0, "the right singular vector of L associated with the smallest singular value", and "L poorly conditioned numerically … much better results … by performing a simple data normalization" (citing Hartley, 1995)</p>
+  </div>
+  <div class="card" data-shot>
+    <h3>Trace one photo</h3>
+    <div class="ctl">
+      <div><div class="lbl">photo</div><div class="seg" id="s1ph"></div></div>
+      <div class="sl"><div class="sl-h"><span>corner noise σ</span><b id="s1sv">0.5 px</b></div><input type="range" id="s1s" min="0" max="2" step="0.1" value="0.5" aria-label="Corner noise in pixels"></div>
+      <div><label class="tg"><input type="checkbox" id="s1n" checked><span class="sw"></span>normalise first (Hartley)</label></div>
+      <div class="btnrow"><button class="act" id="s1go">Find H</button></div>
+    </div>
+    <canvas id="s1c" class="frame" aria-label="The photo, with the corners found and the chart traced through H"></canvas>
+    <div class="legend"><span><span class="dot" style="background:#F4C430"></span>corners as found (with noise)</span><span><span class="ring"></span>the chart's corners sent through H</span></div>
+    <div class="grid g4">
+      <div class="stat"><div class="v" id="s1rs">–</div><div class="l">H vs the corners found, RMS</div></div>
+      <div class="stat"><div class="v good" id="s1rt">–</div><div class="l">H vs the true corners, RMS</div></div>
+      <div class="stat"><div class="v" id="s1cond">–</div><div class="l">conditioning σ₁/σ₈ of L</div></div>
+      <div class="stat"><div class="v" id="s1L">–</div><div class="l">equations for 8 unknowns</div></div>
+    </div>
+    <div class="matrow" id="s1H"></div>
+    <canvas id="s1sv9" class="bars" aria-label="The nine singular values of L"></canvas>
+    <div class="chartcap">The nine singular values of L, on a log scale. Eight are large; the ninth is (nearly) zero, and its singular vector is H. With noise it lifts off zero: no H fits every noisy corner exactly.</div>
+    <div class="status" id="s1st"></div>
+  </div>
+  <div class="card">
+    <h3>Where is the chart's zero?</h3>
+    <p class="lede">The DLT minimises an algebraic quantity, |L h|, not a distance in pixels, and what that quantity weighs depends on your coordinates. Number the corners from a point 1 m off the chart (say, the corner of the shop wall), or photograph the chart from across the room, and the un-normalised solve gets lopsided. Hartley's fix: shift each set of points so its centroid is at zero, scale it so the mean distance is √2, solve, and undo the shift. One hundred photos per run, each with fresh noise.</p>
+    <div class="ctl">
+      <div><div class="lbl">chart distance</div><div class="seg" id="s1dist"></div></div>
+      <div class="sl"><div class="sl-h"><span>origin offset</span><b id="s1ov">1000 mm</b></div><input type="range" id="s1o" min="0" max="3000" step="100" value="1000" aria-label="Origin offset in millimetres"></div>
+      <div class="btnrow"><button class="act" id="s1trial">100 noisy photos</button><button class="ghost" id="s1sweep">Sweep the offset</button></div>
+    </div>
+    <div class="grid g4" style="margin-top:10px">
+      <div class="stat"><div class="v bad" id="s1um">–</div><div class="l">un-normalised, median error</div></div>
+      <div class="stat"><div class="v bad" id="s1uw">–</div><div class="l">un-normalised, worst of 100</div></div>
+      <div class="stat"><div class="v good" id="s1zm">–</div><div class="l">normalised, median error</div></div>
+      <div class="stat"><div class="v good" id="s1zw">–</div><div class="l">normalised, worst of 100</div></div>
+    </div>
+    <canvas id="s1chart" class="chart" aria-label="Median error against the origin offset, un-normalised and normalised"></canvas>
+    <div class="status" id="s1st2"></div>
+    <div class="predict" data-p="s1a">
+      <div class="tag">Guess first!</div>
+      <div class="q">The usual case: chart at 450 mm, corners numbered from its own corner, σ = 0.5 px. Over 100 photos, how much does normalising improve the median error?</div>
+      <div class="opts"><button>About 10×</button><button>About 2×</button><button data-right>Hardly at all</button></div>
+      <div class="why">0.189 px un-normalised against 0.188 px normalised. In double precision, with sensible coordinates, the un-normalised DLT is fine here even though L's conditioning is 2.8 × 10⁵ against 3.6. Normalisation is insurance against the cases below, and it costs nothing.</div>
+    </div>
+    <div class="predict" data-p="s1b">
+      <div class="tag">Guess first!</div>
+      <div class="q">Now the chart is 2.5 m away and its corners are numbered from a point 1 m off. Un-normalised, what's the median error over 100 photos?</div>
+      <div class="opts"><button>Still about 0.2 px</button><button data-right>Over 5 px, and one photo 2,000 px off</button><button>It can't be computed</button></div>
+      <div class="why">Median <b>5.41 px</b>, worst <b>2,031 px</b>; normalised, 0.187 px and 0.31 px, wherever the origin is. Same photos, same corners: only the bookkeeping changed. That's Hartley's point, and why Zhang's appendix tells you to normalise.</div>
+    </div>
+    <div class="say" data-say="s1">
+      <div class="tag">Say it out loud</div>
+      <div class="line">One photo of a flat chart is one homography, H = K[r1 r2 t]: stack two equations per corner and take the smallest singular vector. Normalise both point sets first, or the answer depends on where you put the origin and how far away the chart is.</div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ STEP 2 ============ -->
+<section id="s2" data-title="Two Clues" data-n="2">
+  <div class="card">
+    <div class="scene" data-art="s2"></div>
+    <h2>2 · Two clues per photo: why one view isn't enough</h2>
+    <p class="lede">H = λK[r1 r2 t], and r1, r2 are two columns of a rotation: perpendicular, and the same length. Undo K and those two facts become two equations, h1ᵀBh2 = 0 and h1ᵀBh1 = h2ᵀBh2, on one matrix, <span class="g" data-g="B">B = K⁻ᵀK⁻¹</span>. B is symmetric, so it's six numbers b, and since its scale is free that's five unknowns: fx, fy, cx, cy and the skew. Every photo adds two rows to a matrix V with V·b = 0 (Zhang's eq. 9). Count: one photo, 2 equations; two photos, 4; three photos, 6 ≥ 5. The pose of each photo (3 numbers of rotation, 3 of position) eats the other 6 of H's 8.</p>
+    <p class="covers">Covers <b>Zhang §2.3</b>: "we can only obtain 2 constraints on the intrinsic parameters" · <b>§3.1</b>: n ≥ 3 gives a unique b; n = 2 needs the skew-free assumption · <b>§4, Proposition 1</b>: a plane parallel to an earlier one adds no constraints</p>
+  </div>
+  <div class="card" data-shot>
+    <h3>Build a set of photos</h3>
+    <p class="lede">Tap photos to put them in the set. The first row is tilted every which way; the second is square-on, moved around and spun; the third is all at the same tilt, only slid around. No noise, so a zero singular value is exactly zero.</p>
+    <div class="trayhead">Tilted every which way</div><div class="tray" id="s2g"></div>
+    <div class="trayhead">Square-on to the camera</div><div class="tray" id="s2f"></div>
+    <div class="trayhead">One tilt, slid around</div><div class="tray" id="s2m"></div>
+    <div class="ctl">
+      <div><label class="tg"><input type="checkbox" id="s2skew"><span class="sw"></span>assume the skew is 0 (one more equation)</label></div>
+      <div class="btnrow"><button class="ghost" id="s2p1">1 photo</button><button class="ghost" id="s2p2">2 photos</button><button class="ghost" id="s2p3">3 photos</button><button class="ghost" id="s2pf">5 square-on</button><button class="ghost" id="s2pm">5 slid</button><button class="ghost" id="s2clr">Clear</button></div>
+    </div>
+    <div class="grid g4" style="margin-top:10px">
+      <div class="stat"><div class="v" id="s2n">0</div><div class="l">photos in the set</div></div>
+      <div class="stat"><div class="v" id="s2rows">0</div><div class="l">equations (rows of V)</div></div>
+      <div class="stat"><div class="v" id="s2z">–</div><div class="l">zero singular values of V</div></div>
+      <div class="stat"><div class="v" id="s2ok">–</div><div class="l">a single answer?</div></div>
+    </div>
+    <canvas id="s2sv" class="bars" aria-label="The six singular values of V"></canvas>
+    <div class="chartcap">The six singular values of V, largest first, on a log scale (relative to the largest). Exactly one zero means exactly one B, up to scale: one camera. Two or more zeros means a whole family of cameras fits the photos equally well.</div>
+    <div class="rx" id="s2card"></div>
+    <div class="predict" data-p="s2a">
+      <div class="tag">Guess first!</div>
+      <div class="q">Five square-on photos, each at a different place, distance and spin. How many zero singular values does V have?</div>
+      <div class="opts"><button>1: five photos is plenty</button><button>2</button><button data-right>4: the same as one photo</button></div>
+      <div class="why">4. Parallel planes meet the plane at infinity in the same line, so every square-on photo repeats the same two equations (Zhang's Proposition 1). Spinning the chart in its own plane doesn't help, and nor does sliding a tilted chart around without changing its tilt: that's a pure translation, and Zhang rules it out too.</div>
+    </div>
+  </div>
+  <div class="card">
+    <h3>How flat is too flat?</h3>
+    <p class="lede">Exactly parallel is exactly degenerate. Nearly parallel is nearly degenerate, and noise finishes the job. Each run: 200 sessions of 3 photos at 500 mm, tilted by the same angle about random axes, with 0.5 px of corner noise. A session fails if B comes out impossible (not positive definite, so no real camera has it) or fx is more than 50% off.</p>
+    <div class="btnrow"><button class="act" id="s2flat">Run 200 sessions at each tilt</button></div>
+    <canvas id="s2chart" class="chart" aria-label="Failed sessions against tilt"></canvas>
+    <div class="tablewrap"><table class="ladder" id="s2tab"></table></div>
+    <div class="status" id="s2st"></div>
+    <div class="predict" data-p="s2b">
+      <div class="tag">Guess first!</div>
+      <div class="q">Three photos tilted 5°, σ = 0.5 px. Of 200 sessions, how many blow up?</div>
+      <div class="opts"><button>None: 5° is still a tilt</button><button data-right>About 1 in 4</button><button>All of them</button></div>
+      <div class="why"><b>45 of 200</b>, and the ones that survive are 13% off in fx on average. At 2° it's 150 of 200; from 20° on, 3 to 5. Zhang's own simulation (his camera, his chart) lost 40% of trials at 5° and did best around 45°.</div>
+    </div>
+    <div class="say" data-say="s2">
+      <div class="tag">Say it out loud</div>
+      <div class="line">Each photo of a plane gives two equations on B = K⁻ᵀK⁻¹, which has five unknowns: three photos in general, two if you assume no skew. Photos of parallel planes repeat the same two equations, so what counts is how differently the chart is tilted, not how many photos you take.</div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ STEP 3 ============ -->
+<section id="s3" data-title="The Closed Form" data-n="3">
+  <div class="card">
+    <div class="scene" data-art="s3"></div>
+    <h2>3 · The closed form: writing the prescription</h2>
+    <p class="lede">With three or more photos, stack every photo's two rows into V and take the right singular vector of its smallest singular value: that's b, so that's B. Zhang's Appendix B reads K straight out of B: cy = (B12B13 − B11B23)/(B11B22 − B12²), then λ, fx = √(λ/B11), fy, the skew and cx. Then every photo's pose follows from K⁻¹H: r1 = λK⁻¹h1, r2 = λK⁻¹h2, r3 = r1 × r2, t = λK⁻¹h3, and the nearest true rotation (App. C). No iterations, no starting guess: a <span class="g" data-g="closed">closed form</span>.</p>
+    <p class="covers">Covers <b>Zhang §3.1</b>: V b = 0 by SVD, K from B (App. B), extrinsics from K⁻¹H, the best rotation by SVD (App. C) · Table 1: on a real camera, 3 photos' closed form gave α = 917.65 against 830.80 after refinement</p>
+  </div>
+  <div class="card" data-shot>
+    <h3>Solve it</h3>
+    <div class="ctl">
+      <div class="sl"><div class="sl-h"><span>photos</span><b id="s3nv">3</b></div><input type="range" id="s3n" min="2" max="20" step="1" value="3" aria-label="Number of photos"></div>
+      <div class="sl"><div class="sl-h"><span>corner noise σ</span><b id="s3sv">0.5 px</b></div><input type="range" id="s3s" min="0" max="2" step="0.1" value="0.5" aria-label="Corner noise in pixels"></div>
+      <div class="btnrow"><button class="act" id="s3go">Write the prescription</button></div>
+    </div>
+    <div class="rx" id="s3card"></div>
+    <canvas id="s3top" class="top" aria-label="Seen from above: the camera and where each chart was, recovered and true"></canvas>
+    <div class="legend"><span><span class="dot" style="background:#3B7422"></span>where the chart really was</span><span><span class="dot" style="background:#246A9C"></span>where the closed form puts it</span><span>seen from above; the camera at the bottom, looking up the page</span></div>
+    <div class="status" id="s3st"></div>
+  </div>
+  <div class="card">
+    <h3>More photos, steadier card</h3>
+    <p class="lede">The closed form minimises an algebraic error, so noise leaks straight into K. Average 20 independent sessions at each count (σ = 0.5 px, lens dial at 0) and watch the errors fall.</p>
+    <div class="btnrow"><button class="act" id="s3sweep">20 sessions at each count</button></div>
+    <canvas id="s3chart" class="chart" aria-label="Closed-form errors against the number of photos"></canvas>
+    <div class="tablewrap"><table class="ladder" id="s3tab"></table></div>
+    <div class="status" id="s3st2"></div>
+    <div class="predict" data-p="s3a">
+      <div class="tag">Guess first!</div>
+      <div class="q">No noise at all, three tilted photos. How close is the closed form to the answer key?</div>
+      <div class="opts"><button>Within a pixel</button><button>Within 1%</button><button data-right>Exact, to the last digit we print</button></div>
+      <div class="why">Exact: fx 1061.81, fy 1062.19, cx 596.78, cy 474.52, skew 0.00, and every chart position to 10⁻¹² mm. The method has no approximation in it; only noise and the lens (step 4) make it wrong. Set σ to 0 and press the button.</div>
+    </div>
+    <div class="predict" data-p="s3b">
+      <div class="tag">Guess first!</div>
+      <div class="q">σ = 0.5 px. Going from 3 photos to 12, the closed form's principal point error (averaged over 20 sessions) goes from 8.9 px to…</div>
+      <div class="opts"><button>About 8 px: count doesn't matter</button><button data-right>About 3 px</button><button>Under 0.1 px</button></div>
+      <div class="why">3.2 px, and fx from 1.04% off to 0.25%. Better, but the principal point is the hardest number on the card, and the closed form is only the starting guess. With two photos (and the skew assumed 0) it's 5.1% and 49 px.</div>
+    </div>
+    <div class="say" data-say="s3">
+      <div class="tag">Say it out loud</div>
+      <div class="line">Stack two rows per photo into V, take the singular vector of the smallest singular value, and read K straight out of B; then each photo's rotation and position follow from K⁻¹H. It's exact without noise and fast with it, and it's a starting point, not the answer.</div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ STEP 4 ============ -->
+<section id="s4" data-title="The Lens Dial" data-n="4">
+  <div class="card">
+    <div class="scene" data-art="s4"></div>
+    <h2>4 · The lens dial: radial distortion</h2>
+    <p class="lede">Now the real lens goes back in. A wide, cheap lens bends straight lines, more the further they are from the principal point. Zhang's model moves each point along its ray from the principal point: in normalised coordinates, x̆ = x(1 + k1·r² + k2·r⁴), with r² = x² + y². Negative k1 is <span class="g" data-g="barrel">barrel</span> distortion, pulling the edges in; positive is pincushion. Microduck's lens has k1 = −0.347 and k2 = +0.146. A homography can't bend, so every step so far is now wrong, as you'll see.</p>
+    <p class="covers">Covers <b>Zhang §3.3</b>: the first two radial terms; "the distortion function is totally dominated by the radial components, and especially dominated by the first term"; distortion by linear least squares, k = (DᵀD)⁻¹Dᵀd (eq. 13)</p>
+  </div>
+  <div class="card" data-shot>
+    <h3>Turn the dial</h3>
+    <div class="ctl">
+      <div class="sl"><div class="sl-h"><span>k1</span><b id="s4k1v">−0.347</b></div><input type="range" id="s4k1" min="-0.5" max="0.3" step="0.001" value="-0.347" aria-label="k1"></div>
+      <div class="sl"><div class="sl-h"><span>k2</span><b id="s4k2v">0.146</b></div><input type="range" id="s4k2" min="-0.2" max="0.4" step="0.001" value="0.146" aria-label="k2"></div>
+      <div><div class="lbl">chart</div><div class="seg" id="s4where"></div></div>
+      <div class="btnrow"><button class="ghost" id="s4reset">Microduck's lens</button><button class="ghost" id="s4zero">Dial at 0</button></div>
+    </div>
+    <canvas id="s4c" class="frame" aria-label="The chart seen through the dialled lens, with the straight pinhole corners for comparison"></canvas>
+    <div class="grid g3">
+      <div class="stat"><div class="v" id="s4bend">–</div><div class="l">top row's bend from straight</div></div>
+      <div class="stat"><div class="v" id="s4move">–</div><div class="l">furthest a corner moved</div></div>
+      <div class="stat"><div class="v" id="s4corner">–</div><div class="l">a ray aimed at the frame's top-right corner lands this far in</div></div>
+    </div>
+    <canvas id="s4curve" class="chart sm" aria-label="Distorted radius against the true radius"></canvas>
+    <div class="chartcap">Where a ray lands (distorted radius, in focal lengths) against where a pinhole would put it. The dashed line is no distortion; the dotted line marks the frame's furthest corner from the principal point.</div>
+  </div>
+  <div class="card">
+    <h3>What the closed form makes of a bent eye</h3>
+    <p class="lede">The exam: 12 photos of the chart through Microduck's real lens, corners found to σ = 0.25 px. First, steps 1 to 3 exactly as before, pretending the lens is a pinhole. Then Zhang's linear fix: with that K and those poses, the pinhole predicts each corner at (u, v); the corner was seen at (ŭ, v̆); two equations per corner are linear in k1 and k2.</p>
+    <div class="btnrow"><button class="act" id="s4cf">1 · Closed form, ignoring the lens</button><button class="act" id="s4lin">2 · Add k1, k2 by least squares</button></div>
+    <div class="rx" id="s4card"></div>
+    <canvas id="s4res" class="frame" aria-label="One photo of the exam with the reprojection errors drawn as arrows"></canvas>
+    <div class="legend"><span><span class="dot" style="background:#F4C430"></span>corner as seen</span><span><span class="ring"></span>where the current card predicts it</span><span><b style="color:#A5321F">→</b> the error, drawn 5× longer</span></div>
+    <div class="status" id="s4st"></div>
+    <div class="predict" data-p="s4a">
+      <div class="tag">Guess first!</div>
+      <div class="q">With k1 = −0.347, where does the lens put a ray that a pinhole would put exactly at the frame's top-right corner?</div>
+      <div class="opts"><button>Slightly outside the frame</button><button>A couple of pixels in</button><button data-right>About 130 px in, towards the middle</button></div>
+      <div class="why">131.0 px nearer the principal point (106.7 px for the top-left corner, which is closer to it). The radius shrinks by 1 + k1·r² + k2·r⁴ ≈ 0.84 out there. That's why the corners of the frame matter so much for estimating it (step 6).</div>
+    </div>
+    <div class="predict" data-p="s4b">
+      <div class="tag">Guess first!</div>
+      <div class="q">The linear fix, starting from the lens-blind closed form: what sign does it give k1?</div>
+      <div class="opts"><button>Negative, about right</button><button data-right>Positive: pincushion, the wrong way round</button><button>Exactly zero</button></div>
+      <div class="why">k1 = <b>+0.097</b>, k2 = −0.272, against the truth −0.347 and +0.146; the RMS only falls from 18.22 to 18.01 px. Zhang saw the same on his real camera (Table 1: closed form k1 = +0.161, final −0.227) and explains why: with the lens ignored, the closed form's predicted outer corners lie closer to the image centre than the seen ones, so the linear fit "tries to spread the outer points", a pincushion shape that doesn't match the real barrel. Only refining everything together untangles them.</div>
+    </div>
+    <div class="say" data-say="s4">
+      <div class="tag">Say it out loud</div>
+      <div class="line">A real lens moves each point along its ray from the principal point by 1 + k1·r² + k2·r⁴; negative k1 is barrel. The closed form can't see that, so its K and even a linear k1 come out wrong, and only the joint refinement untangles them.</div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ STEP 5 ============ -->
+<section id="s5" data-title="Better One or Two?" data-n="5">
+  <div class="card">
+    <div class="scene" data-art="s5"></div>
+    <h2>5 · Better one, or two? Refinement and its score</h2>
+    <p class="lede">The optician's last step: flip between two lenses, keep the sharper one, repeat in smaller steps. The math version is <span class="g" data-g="lm">Levenberg–Marquardt</span>: start from the closed form and the linear k1, k2, and move all the numbers at once (fx, fy, cx, cy, k1, k2, and every photo's 3 rotation and 3 position numbers: 6 + 6 × 12 = 78 here, with the skew held at 0) to shrink the total squared distance between each corner as seen and where the card predicts it. The <span class="g" data-g="jacobian">Jacobian</span> says which way is downhill; λ blends a Gauss–Newton jump with a cautious gradient step. The score at the end is the <span class="g" data-g="rms">reprojection RMS</span>, the one number OpenCV's <code>calibrateCamera</code> returns.</p>
+    <p class="covers">Covers <b>Zhang §3.2–3.3</b>: maximum-likelihood refinement of eq. 14 with Levenberg–Marquardt, rotations as Rodrigues vectors · <b>OpenCV</b> <code>calibrateCamera</code>: "Run the global Levenberg-Marquardt optimization algorithm to minimize the reprojection error"; returns "the overall RMS re-projection error"</p>
+  </div>
+  <div class="card" data-shot>
+    <h3>Better one, or two?</h3>
+    <div class="ctl">
+      <div><label class="tg"><input type="checkbox" id="s5skew"><span class="sw"></span>let the skew float (Zhang) instead of holding it at 0 (OpenCV)</label></div>
+      <div class="btnrow"><button class="act" id="s5go">Refine</button><button class="ghost" id="s5step">One step at a time</button></div>
+    </div>
+    <canvas id="s5chart" class="chart" aria-label="Reprojection RMS at each Levenberg–Marquardt step"></canvas>
+    <div class="rx" id="s5card"></div>
+    <canvas id="s5res" class="frame" aria-label="One photo of the exam with its reprojection errors, drawn 40 times longer"></canvas>
+    <div class="legend"><span><span class="dot" style="background:#F4C430"></span>corner as seen</span><span><span class="ring"></span>where the card predicts it</span><span><b style="color:#A5321F">→</b> the error, drawn longer (the scale is on the photo)</span></div>
+    <div class="status" id="s5st"></div>
+    <div class="predict" data-p="s5a">
+      <div class="tag">Guess first!</div>
+      <div class="q">The corners were found with σ = 0.25 px of noise on each axis. After refinement, what's the best RMS you could hope for?</div>
+      <div class="opts"><button>0.00 px, a perfect fit</button><button data-right>About 0.35 px</button><button>About 0.25 px</button></div>
+      <div class="why">The noise itself: σ√2 = 0.354 px per corner (two axes). The exam ends at <b>0.350 px</b>, a hair under, because 78 free numbers can soak up a little of the noise. An RMS far below the corner detector's noise means the model is fitting noise, not the lens.</div>
+    </div>
+  </div>
+  <div class="card">
+    <h3>Is a low score a good eye?</h3>
+    <p class="lede">The RMS says how well the card fits <i>these</i> photos. Two more judges: a <span class="g" data-g="holdout">second opinion</span>, 10 photos the calibration never saw (fit only each photo's pose, keep the card fixed, report their RMS), and the answer key, which only a lab has: how many pixels off the card is across the whole frame, and how many degrees it would mis-turn the duck's head (step 6). Five sessions, the same chart, the same corner noise:</p>
+    <div class="btnrow"><button class="act" id="s5judge">Judge five sessions</button></div>
+    <div class="tablewrap"><table class="ladder" id="s5tab"></table></div>
+    <div class="status" id="s5st2"></div>
+    <div class="predict" data-p="s5b">
+      <div class="tag">Guess first!</div>
+      <div class="q">A calibration with the lens dial held at 0 scores RMS 4.36 px. Drop the 6 photos with the worst error and solve again: the RMS halves to 2.08 px. Is it a better calibration?</div>
+      <div class="opts"><button>Yes, the score halved</button><button data-right>No: the second opinion gets worse</button><button>It's the same</button></div>
+      <div class="why">No. Hold-out RMS goes from 3.65 to <b>3.81 px</b>; the worst head-turn error only shrinks from 10.6° to 7.1°, still enormous. Dropping the hard photos made the exam easier, not the eye better: the six it dropped were mostly the ones reaching furthest from the principal point, where the missing lens dial shows most. And the corner-blind session scores 0.347 px, as good as the real exam's 0.350, while being up to 58 px wrong in the corners it never saw.</div>
+    </div>
+    <div class="say" data-say="s5">
+      <div class="tag">Say it out loud</div>
+      <div class="line">Refinement minimises the total reprojection error over every corner in every photo with Levenberg–Marquardt, starting from the closed form. The RMS it reports is how well the model fits these photos, not how right it is: judge it on photos it never saw, and suspect any fix that only lowers the score.</div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ STEP 6 ============ -->
+<section id="s6" data-title="The Fitting" data-n="6">
+  <div class="card">
+    <div class="scene" data-art="s6"></div>
+    <h2>6 · The fitting: a good session, and what a bad one costs</h2>
+    <p class="lede">You control four things in a real session: how many photos, how much the chart is tilted, whether its corners reach every part of the frame, and how sharply the corners are found (<span class="g" data-g="subpixel">sub-pixel</span> refinement, like OpenCV's <code>cornerSubPix</code>, places them to a fraction of a pixel; σ here is per axis). Book a session, calibrate it with the full pipeline, and read every judge. Then turn the card into what the duck actually does with it: a head turn.</p>
+    <p class="covers">Covers <b>OpenCV tutorial</b>: "you will probably need at least 10 good snapshots of the input pattern in different positions" · <b>calibrateCamera notes</b>: "use multiple board poses with significant tilt" · <b>Zhang §5.1</b>: errors grow linearly with noise; best near 45° · <b>Microduck</b>: <code>bearing()</code> in duck-detect, the quarter turn in uyvy</p>
+  </div>
+  <div class="card" data-shot>
+    <h3>Book a session</h3>
+    <div class="ctl">
+      <div class="sl"><div class="sl-h"><span>photos</span><b id="s6nv">12</b></div><input type="range" id="s6n" min="3" max="30" step="1" value="12" aria-label="Number of photos"></div>
+      <div><div class="lbl">tilt</div><div class="seg" id="s6tilt"></div></div>
+      <div><div class="lbl">where the chart goes</div><div class="seg" id="s6cover"></div></div>
+      <div><div class="lbl">corner noise σ</div><div class="seg" id="s6sig"></div></div>
+      <div class="btnrow"><button class="act" id="s6go">Book it and calibrate</button></div>
+    </div>
+    <div class="grid g4" style="margin-top:10px">
+      <div class="stat"><div class="v" id="s6rms">–</div><div class="l">RMS (what the optician sees)</div></div>
+      <div class="stat"><div class="v" id="s6hold">–</div><div class="l">second opinion (hold-out RMS)</div></div>
+      <div class="stat"><div class="v" id="s6map">–</div><div class="l">answer key: mean / worst px off</div></div>
+      <div class="stat"><div class="v" id="s6turn">–</div><div class="l">answer key: worst head-turn error</div></div>
+    </div>
+    <canvas id="s6heat" class="heat" aria-label="How many pixels off the calibration is, across the frame"></canvas>
+    <div class="chartcap" id="s6heatcap">Across the 1280 × 720 frame: how far the card puts a ray from where the true camera puts it. Pale is under 1 px; darker is worse. The dots are where the session's chart corners landed.</div>
+    <div class="rx" id="s6card"></div>
+    <div class="status" id="s6st"></div>
+    <div class="predict" data-p="s6b">
+      <div class="tag">Guess first!</div>
+      <div class="q">Keep everything else, but find the corners 8× less sharply: σ from 0.25 to 2 px. The RMS goes from 0.36 to 2.84 px. The worst head-turn error?</div>
+      <div class="opts"><button>Several degrees</button><button data-right>Still under a fifth of a degree</button><button>No answer: it fails</button></div>
+      <div class="why">0.14°. Fuzzy corners raise the RMS (most of it is the noise itself) and smear the card by 14 px on average, but most of that is cx, 14.4 px off, which is up–down for the upright duck; fy and cy, which set its left–right, are off by only 0.51% and 1.4 px. The failures that matter for the duck are structural: the lens dial left at 0, flat photos, a frame left uncovered.</div>
+    </div>
+  </div>
+  <div class="card">
+    <h3>What it costs the duck</h3>
+    <p class="lede">Microduck's detector works on the frame turned a quarter turn clockwise, 720 × 1280, upright: upright pixel (x′, y′) comes from stream pixel (y′, 719 − x′). Its bearing is b = (box centre x′ / 720) · 2 − 1, from −1 (hard left) to +1 (hard right). So left–right for the duck runs along the stream's <i>vertical</i> axis: fy and cy set the angle, and the principal point sits at x′ = 719 − 474.52 = 244.5, <b>115 px left of the upright frame's middle</b>. The head should turn atan of the undistorted ray's slope (assuming the camera looks straight down the head's axis). Compare four cards:</p>
+    <div class="ctl">
+      <div class="sl"><div class="sl-h"><span>bearing b</span><b id="s6bv">0.50</b></div><input type="range" id="s6b" min="-1" max="1" step="0.05" value="0.5" aria-label="Bearing"></div>
+    </div>
+    <canvas id="s6turnc" class="chart tall" aria-label="Head-turn error against bearing for four camera models"></canvas>
+    <div class="tablewrap"><table class="ladder" id="s6ttab"></table></div>
+    <div class="callout co-i"><b>What changed upstream.</b> When Duck's-Eye View was built (microduck @ 590b986), the robot's intrinsics were "placeholder" (a TODO in its design notes), so that lab assumed a centred pinhole with f = 1065 px, the design figure the repo's mediad still uses as a fallback, and showed that a "62° across the width" placeholder would over-turn the head by about 7° at b = 0.5. The repo now ships the real solve (648bf22). Against it, the centred pinhole itself is off by 6.2° at b = 0 and up to 7.1° at the frame's edge, almost all of it the principal point. Distortion adds a little near the edges.</div>
+    <div class="predict" data-p="s6a">
+      <div class="tag">Guess first!</div>
+      <div class="q">Duck's-Eye View read b = 0.5 as 9.6° with a centred pinhole. With Microduck's own calibration, b = 0.5 is…</div>
+      <div class="opts"><button>9.6°: the centred pinhole was right</button><button>About 10.5°: distortion adds a bit</button><button data-right>About 16°</button></div>
+      <div class="why"><b>15.95°</b>. The optical axis is 115 px to the left of the upright frame's middle, so everything is 6.2° further right than a centred pinhole thinks. At 3 m, 6.2° is a 33 cm miss: more than the width of the 25 cm duck it's looking for. Your 12-photo calibration gets it to within 0.05°.</div>
+    </div>
+    <div class="say" data-say="s6">
+      <div class="tag">Say it out loud</div>
+      <div class="line">Take ten or more photos, tilted 20 to 50 degrees, that put the chart's corners in every part of the frame, with sub-pixel corners, and judge on held-out photos. For a robot the payoff is in degrees: a good calibration turns Microduck's head to within a tenth of a degree, while assuming a centred pinhole costs six.</div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ REVIEW BOARD ============ -->
+<section id="cap" data-title="Review Board" data-n="★">
+  <div class="card">
+    <div class="scene" data-art="cap"></div>
+    <h2>★ The optician's review board</h2>
+    <p class="lede">Three prescriptions came back with complaints. For each: run the session as it was booked, pick a fix, re-run it, and name the cause. The tempting wrong fixes are on the list, and they fail for the reason the steps taught. Each case is scored on the re-run, judged against the answer key, <em>and</em> on the cause.</p>
+    <div id="capcases"></div>
+    <div class="row" style="margin-top:12px"><span class="stars" id="capstars">☆☆☆</span><span class="verdict" id="capverdict"></span></div>
+  </div>
+</section>
+
+<!-- ============ FIELD TEST ============ -->
+<section id="ft" data-title="Field Test" data-n="✓">
+  <div class="card">
+    <h2>✓ Field test</h2>
+    <p class="lede">Ten questions. Answer each by operating the widget in the step named, not from memory. Eight or more earns the check.</p>
+    <div id="ftqs"></div>
+    <div class="btnrow"><button class="act" id="ftgo">Grade me</button><span id="ftscore" style="font:18px var(--hand);align-self:center"></span></div>
+  </div>
+  <div class="card">
+    <h3>What's exact here, and what's a teaching model</h3>
+    <ul class="honest">
+      <li><b>The real math, written out in <code>js/core.js</code>:</b> the direct linear transform for a homography and Hartley's normalisation (Zhang App. A); the two constraints per homography, V b = 0 by singular value decomposition, and K from B (§3.1, App. B); the extrinsics from K⁻¹H and the nearest rotation (App. C); radial distortion by linear least squares (eq. 13); Levenberg–Marquardt on the total reprojection error (eq. 14) with Rodrigues rotations; the reprojection RMS as OpenCV's <code>calibrateCamera</code> computes it, √(Σ|e|²/N). The SVD (one-sided Jacobi), the symmetric eigen-decomposition (Jacobi), the 3 × 3 inverse and the Cholesky solve are hand-written; <code>tests/check.js</code> checks them, and that DLT and Zhang recover a known H and K exactly with no noise.</li>
+      <li><b>Teaching models, labelled on the page:</b> the photos are synthetic. The chart is a perfect 9 × 6 grid at 25 mm; each photo's pose is drawn from a seed and kept fully in frame; the corner detector is the true corner plus Gaussian noise of σ pixels per axis (real detectors are worse on steep, blurry or dim photos, which this ignores: Zhang notes foreshortening "is not considered" in his simulation either). The true camera is Microduck's published calibration, rounded, with k1 and k2 only; its tangential terms and k3 are left out. LM holds the skew at 0 by default, as OpenCV does; OpenCV's own first guess is simpler than Zhang's (principal point at the frame's middle, focal lengths by least squares), and its current 4.x source solves the same least-squares problem with a sparse bundle-adjustment formulation by default; this lab follows Zhang's paper. Its Jacobian is numeric (central differences), not analytic.</li>
+      <li><b>The head turn is geometry, not the robot's code.</b> The bearing formula and the quarter turn are Microduck's (duck-detect, uyvy); turning a bearing into an angle with a calibration, and assuming the camera looks straight down the head's axis, is ours. Mounting the camera at an angle would add an extrinsic offset this lab doesn't model.</li>
+      <li><b>The directions are real; the numbers are this toy's.</b> A real session has blur, lighting, a chart that isn't quite flat, and a detector that sometimes mislabels a corner. The failure modes here (flat photos, an uncovered frame, a model without a lens) are the real ones.</li>
+    </ul>
+    <p class="muted" style="font-size:15px;margin-top:10px">Sources (sections and exact quotes in <a href="https://github.com/bakulbadwal/ducks-eye-view/blob/main/eye-exam/SOURCES.md" target="_blank" rel="noopener">SOURCES.md</a>): Z. Zhang, <a href="https://www.microsoft.com/en-us/research/wp-content/uploads/2016/02/tr98-71.pdf" target="_blank" rel="noopener"><em>A Flexible New Technique for Camera Calibration</em></a>, MSR-TR-98-71 (journal version: IEEE TPAMI 22(11), 2000) · OpenCV <a href="https://docs.opencv.org/4.x/d9/d0c/group__calib3d.html" target="_blank" rel="noopener"><code>calibrateCamera</code></a> and its <a href="https://docs.opencv.org/4.x/d4/d94/tutorial_camera_calibration.html" target="_blank" rel="noopener">calibration tutorial</a> · R. Hartley, <em>In Defence of the 8-Point Algorithm</em> (ICCV 1995), cited by Zhang for normalisation · <a href="https://github.com/pollen-robotics/microduck/tree/648bf22" target="_blank" rel="noopener">pollen-robotics/microduck @ 648bf22</a> (Apache-2.0): <code>robotd-params/src/lib.rs</code>, <code>mediad/src/camera.rs</code>, <code>duck-detect/src/lib.rs</code>, <code>uyvy/src/lib.rs</code> · <a href="https://bakulbadwal.github.io/ducks-eye-view/">Duck's-Eye View</a>, step 5.</p>
+    <div class="btnrow"><button class="ghost" id="reset">Reset all progress</button></div>
+  </div>
+</section>
+
+<p class="series">Part of a series of hands-on labs: <a href="https://bakulbadwal.github.io/inference-kitchen/">Inference Kitchen</a> (serving) · <a href="https://bakulbadwal.github.io/finishing-school/">Finishing School</a> (post-training) · <a href="https://bakulbadwal.github.io/arm-playground/">Arm Playground</a> (kinematics and control) · <a href="https://bakulbadwal.github.io/policy-pond/">Policy Pond</a> (reinforcement learning) · <a href="https://bakulbadwal.github.io/fork-in-the-road/">Fork in the Road</a> (diffusion policies) · <a href="https://bakulbadwal.github.io/ducks-eye-view/">Duck's-Eye View</a> (robot vision) · <a href="https://bakulbadwal.github.io/wet-paint/">Wet Paint</a> (imitation learning and real-time execution) · <b>Eye Exam</b> (camera calibration)</p>
+</div>
+<div id="tip" role="tooltip"></div>
+<footer>Eye Exam · Zhang's camera calibration, run for real on photos of a toy chart through Microduck's real camera · <a href="https://github.com/bakulbadwal/ducks-eye-view/tree/main/eye-exam" style="color:#D4F1EC">source</a></footer>
+
+<script src="js/core.js"></script>
+<script src="js/glossary.js"></script>
+<script src="js/art.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
