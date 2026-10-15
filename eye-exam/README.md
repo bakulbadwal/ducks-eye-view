@@ -6,6 +6,10 @@
 
 ![Eye Exam: a Busytown optician's shop, where a robot duck in the exam chair looks at a checkerboard eye chart held up by the optician](docs/hero.png)
 
+![Animated demo of step 5: Levenberg–Marquardt refines the exam's prescription card one step at a time; the reprojection RMS falls from 18.9 px to the 0.35 px noise floor over 13 steps while the card's numbers turn from red to green against the answer key](docs/demo.gif)
+
+*Step 5 in motion: "better one, or two?" thirteen times, from RMS 18.9 px to 0.350 px, and cy walks from 237 px to the true 475.*
+
 ![One exam photo through Microduck's lens, graded by the lens-blind closed form: yellow dots are the corners as seen, blue rings where the pinhole card predicts them, and red arrows the reprojection error drawn five times longer](docs/drive.png)
 
 *Step 4: one exam photo graded by the closed form that ignores the lens. The red arrows are the reprojection error, drawn 5× longer; the lens pulled the outer corners in, and a pinhole has nowhere to put that bend but into a wrong K.*
