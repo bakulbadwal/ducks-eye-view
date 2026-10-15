@@ -22,7 +22,7 @@ a{color:var(--sky-d);text-underline-offset:3px}
 
 /* ---------- masthead: a painted highway guide sign ---------- */
 header{display:grid;grid-template-columns:auto 1fr;gap:20px;align-items:center;padding:10px 0 18px}
-.mast{display:inline-block;background:var(--shop);color:var(--paper);border:var(--stroke);border-radius:10px;padding:6px 18px 8px;box-shadow:var(--lift);transform:rotate(-1.5deg)}
+.mast{display:inline-block;background:var(--shop);color:var(--paper);border:var(--stroke);border-radius:10px;padding:8px 20px 10px;box-shadow:inset 0 0 0 2px rgba(205,235,230,.8),var(--lift);transform:rotate(-1.5deg)}
 .mast b{display:block;font:800 42px/1.05 var(--sign);letter-spacing:.01em;text-shadow:2px 2px 0 #0D4545}
 .mast span{display:block;font:400 17px/1.2 var(--hand);color:#D4F1EC;margin-top:2px}
 .mast .mi{display:inline-block;width:38px;height:38px;vertical-align:-7px;margin-right:6px}
@@ -158,7 +158,7 @@ canvas.chart.sm{aspect-ratio:1.8/1}
 canvas.chart{aspect-ratio:2.2/1;height:auto}
 .chartcap{font:400 15px/1.35 var(--hand);color:var(--soft);margin-top:6px}
 .chartcap .sw{display:inline-block;width:12px;height:12px;border:1.5px solid var(--line);border-radius:2px;vertical-align:-1px;margin-right:4px}
-.legend{display:flex;gap:14px;flex-wrap:wrap;font:400 15px var(--hand);color:var(--soft);margin-top:8px}
+.legend{display:flex;gap:6px 14px;flex-wrap:wrap;font:400 15px/1.3 var(--hand);color:var(--soft);margin-top:8px}
 .legend .dot{display:inline-block;width:11px;height:11px;border-radius:50%;border:1.5px solid var(--line);vertical-align:-1px;margin-right:5px}
 
 /* worked math: a chalk box */
@@ -249,7 +249,7 @@ body.shot{padding-bottom:0}body.shot .wrap{padding:14px}body.shot .card{margin-b
 /* ================= Eye Exam: what the optician's shop adds ================= */
 /* the camera frame: what the duck's eye sees, 1280 × 720 */
 canvas.frame{aspect-ratio:16/9;height:auto;background:#EDE7DA}
-canvas.top{aspect-ratio:2/1;height:auto}
+canvas.top{aspect-ratio:2.3/1;height:auto}
 canvas.bars{aspect-ratio:2.6/1;height:auto}
 canvas.heat{aspect-ratio:16/9;height:auto}
 canvas.chart.tall{aspect-ratio:1.7/1}

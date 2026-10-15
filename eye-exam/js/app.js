@@ -24,7 +24,7 @@
 
   /* ---------------- colours (match css tokens) ---------------- */
   var COL = { ink: "#3A2418", line: "#4A2E1E", soft: "#6E5040", sheet: "#FFFDF6", paper: "#FBF7EC", rule: "#E7DCC4", wall: "#EDE7DA",
-    model: "#246A9C", truth: "#3B7422", err: "#A5321F", yellow: "#F4C430", yellowD: "#8A6300", lilac: "#5E4A94", shop: "#1F7A7A", grass: "#5FA03C", brick: "#C8452F", sky: "#9CCBEA", sand: "#DDBB8A" };
+    model: "#246A9C", truth: "#3B7422", err: "#A5321F", yellow: "#F4C430", yellowD: "#8A6300", lilac: "#5E4A94", shop: "#1F7A7A", mint: "#CDEBE6", grass: "#5FA03C", brick: "#C8452F", sky: "#9CCBEA", sand: "#DDBB8A" };
 
   /* ---------------- nav ---------------- */
   var NAV_ICON = { s0: "eye", s1: "trace", s2: "tally", s3: "card", s4: "dial", s5: "onetwo", s6: "glasses", cap: "star", ft: "pencil" };
@@ -33,14 +33,14 @@
     var nav = $("nav"); nav.innerHTML = "";
     sections.forEach(function (s) {
       var b = document.createElement("button"); b.type = "button"; b.dataset.for = s.id;
-      b.innerHTML = '<span class="ic" aria-hidden="true">' + (IC[NAV_ICON[s.id]] || "") + "</span>" + s.dataset.n + " · " + s.dataset.title + (store.said[s.id] ? '<span class="chk">✓</span>' : "");
+      b.innerHTML = '<span class="ic" aria-hidden="true">' + (IC[NAV_ICON[s.id]] || "") + "</span>" + s.dataset.n + " · " + s.dataset.title + (store.said[s.id] ? '<span class="chk" aria-label="done">✓</span>' : "");
       b.onclick = function () { show(s.id); };
       nav.appendChild(b);
     });
   }
   function show(id) {
     sections.forEach(function (s) { s.classList.toggle("on", s.id === id); });
-    qa("#nav button").forEach(function (b) { b.classList.toggle("on", b.dataset.for === id); });
+    qa("#nav button").forEach(function (b) { var on = b.dataset.for === id; b.classList.toggle("on", on); if (on) b.setAttribute("aria-current", "step"); else b.removeAttribute("aria-current"); });
     if (location.hash !== "#/" + id) history.replaceState(null, "", "#/" + id);
     window.scrollTo(0, 0);
     setTimeout(redrawAll, 0);
@@ -141,6 +141,33 @@
     return { g: g, W: w, H: h };
   }
   var HAND = "'Patrick Hand', 'Comic Sans MS', sans-serif", SIGN = "'Grandstander', 'Patrick Hand', sans-serif";
+  // a hand-lettered paper tag pinned on a canvas: lines of text in a rounded box, anchored by its top-left corner
+  function tag(g, x, y, lines, o) {
+    o = o || {}; var fz = o.fz || 12.5, lh = fz + 4, pad = 7;
+    g.font = (o.bold ? "700 " : "") + fz + "px " + (o.bold ? SIGN : HAND);
+    var w = 0; lines.forEach(function (s) { w = Math.max(w, g.measureText(s).width); }); w += pad * 2;
+    var h = lines.length * lh + pad;
+    if (o.right) x -= w; if (o.bottom) y -= h; if (o.center) { x -= w / 2; y -= h / 2; }
+    g.fillStyle = "rgba(255,253,246,.94)"; g.strokeStyle = COL.line; g.lineWidth = 1.2; g.beginPath(); g.roundRect(x, y, w, h, 4); g.fill(); g.stroke();
+    g.fillStyle = o.col || COL.ink; g.textAlign = "left";
+    lines.forEach(function (s, i) { g.fillText(s, x + pad, y + pad / 2 + (i + 1) * lh - 4); });
+    return { x: x, y: y, w: w, h: h };
+  }
+  // the plot area as a sheet of paper: a tinted field with a left and a bottom axis
+  function plotArea(g, W, H, pad) {
+    g.fillStyle = COL.sheet; g.fillRect(0, 0, W, H);
+    g.fillStyle = COL.paper; g.fillRect(pad.l, pad.t, W - pad.l - pad.r, H - pad.t - pad.b);
+  }
+  function plotAxes(g, W, H, pad) { g.strokeStyle = "rgba(74,46,30,.5)"; g.lineWidth = 1; g.beginPath(); g.moveTo(pad.l, pad.t); g.lineTo(pad.l, H - pad.b); g.lineTo(W - pad.r, H - pad.b); g.stroke(); }
+  // a note in the middle of an empty plot, wrapped to the plot's width
+  function emptyNote(g, W, H, pad, text, fz) {
+    fz = fz || 14; g.fillStyle = COL.soft; g.font = fz + "px " + HAND; g.textAlign = "center";
+    var maxw = W - pad.l - pad.r - 16, lines = [], line = "";
+    text.split(" ").forEach(function (w) { var t = line ? line + " " + w : w; if (g.measureText(t).width > maxw && line) { lines.push(line); line = w; } else line = t; });
+    if (line) lines.push(line);
+    var y0 = (pad.t + H - pad.b) / 2 - (lines.length - 1) * (fz + 3) / 2 + 5;
+    lines.forEach(function (l, i) { g.fillText(l, (pad.l + W - pad.r) / 2, y0 + i * (fz + 3)); });
+  }
 
   /* ================= THE FRAME: what the duck's camera sees (1280 × 720) ================= */
   // o: { cam, pose } to paint the chart · seen: corners found (dots) · model: predicted corners (rings) ·
@@ -151,6 +178,17 @@
     var X = function (u) { return (u + 0.5) * sx; }, Y = function (v) { return (v + 0.5) * sy; };
     g.fillStyle = COL.wall; g.fillRect(0, 0, Wc, Hc);
     if (o.heat) heat(g, o.heat, Wc, Hc);
+    // a pixel ruler along the top and left edges, every 128 px across and 120 px down, so the frame reads as 1280 × 720
+    var small = Wc < 480;
+    g.strokeStyle = "rgba(74,46,30,.35)"; g.lineWidth = 1; g.beginPath();
+    for (var u = 0; u <= 1280; u += 128) { g.moveTo(X(u), 0); g.lineTo(X(u), u % 640 === 0 ? 9 : 5); }
+    for (var v = 0; v <= 720; v += 120) { g.moveTo(0, Y(v)); g.lineTo(v % 360 === 0 ? 9 : 5, Y(v)); }
+    g.stroke();
+    if (!small && !o.heat) {
+      g.fillStyle = "rgba(110,80,64,.75)"; g.font = "11px " + HAND; g.textAlign = "center";
+      [320, 640, 960].forEach(function (u) { g.fillText(String(u), X(u), 21); });
+      g.textAlign = "left"; [240, 480].forEach(function (v) { g.fillText(String(v), 12, Y(v) + 4); });
+    }
     if (o.cam && o.pose) paintChart(g, o.cam, o.pose, X, Y, o.faint);
     if (o.hlines) {
       g.strokeStyle = COL.model; g.lineWidth = 1.3; g.setLineDash([4, 3]);
@@ -158,7 +196,7 @@
       for (j = 0; j < EE.CHART.rows; j++) { g.beginPath(); for (i = 0; i < EE.CHART.cols; i++) { p = EE.applyH(o.hlines, i * 25, j * 25); if (i) g.lineTo(X(p[0]), Y(p[1])); else g.moveTo(X(p[0]), Y(p[1])); } g.stroke(); }
       g.setLineDash([]);
     }
-    if (o.dots) { g.fillStyle = "rgba(58,36,24,.55)"; o.dots.forEach(function (p) { g.fillRect(X(p[0]) - 1, Y(p[1]) - 1, 2, 2); }); }
+    if (o.dots) { var dr = Wc < 480 ? 1.3 : 1.8; g.fillStyle = "rgba(58,36,24,.6)"; o.dots.forEach(function (p) { g.beginPath(); g.arc(X(p[0]), Y(p[1]), dr, 0, 7); g.fill(); }); }
     var r = Math.max(2.2, Math.min(4, Wc / 260));
     if (o.model) { g.strokeStyle = COL.model; g.lineWidth = 1.8; o.model.forEach(function (p) { if (!p) return; g.beginPath(); g.arc(X(p[0]), Y(p[1]), r + 2.2, 0, 7); g.stroke(); }); }
     if (o.arrows) {
@@ -177,9 +215,10 @@
       cross(g, X(639.5), Y(359.5), 7, COL.soft, 1.6);
       cross(g, X(EE.TRUE_LENS.cx), Y(EE.TRUE_LENS.cy), 9, COL.err, 2.4);
     }
-    // the frame's border and its pixel scale
+    // the frame's border, its name on a paper tag, and a hint in the middle when there's nothing to show yet
     g.strokeStyle = COL.line; g.lineWidth = 2; g.strokeRect(1, 1, Wc - 2, Hc - 2);
-    if (Wc > 480) { g.font = "12px " + HAND; g.fillStyle = COL.soft; g.textAlign = "right"; g.fillText(o.label || "1280 × 720, as the camera sends it", Wc - 8, Hc - 8); }
+    if (o.label !== " ") tag(g, Wc - 10, Hc - 10, [o.label || "1280 × 720, as the camera sends it"], { right: true, bottom: true, fz: small ? 11.5 : 12.5, col: COL.soft });
+    if (o.hint) tag(g, Wc / 2, Hc * (o.heat === undefined && o.cam ? 0.22 : 0.5), [o.hint], { fz: small ? 12.5 : 15, bold: true, col: COL.soft, center: true });
   }
   function cross(g, x, y, s, col, w) { g.strokeStyle = col; g.lineWidth = w; g.beginPath(); g.moveTo(x - s, y); g.lineTo(x + s, y); g.moveTo(x, y - s); g.lineTo(x, y + s); g.stroke(); }
   // The checkerboard: a white board with a margin, 10 × 7 squares of 25 mm, every edge sampled so the lens can bend it.
@@ -194,20 +233,26 @@
       for (k = 0; k < pts.length; k++) { p = EE.project(cam, pose, pts[k][0], pts[k][1]); if (!p) return false; if (k) g.lineTo(X(p[0]), Y(p[1])); else g.moveTo(X(p[0]), Y(p[1])); }
       g.closePath(); return true;
     }
-    g.globalAlpha = faint ? 0.35 : 1;
+    g.globalAlpha = faint ? 0.5 : 1;
     g.fillStyle = "#FFFDF6"; g.strokeStyle = COL.line; g.lineWidth = 1.6;
     if (poly(-45, -45, 245, 170)) { g.fill(); g.stroke(); }
     g.fillStyle = "#2B2522";
     for (var a = 0; a < 10; a++) for (var b = 0; b < 7; b++) if ((a + b) % 2 === 0) { if (poly(-25 + 25 * a, -25 + 25 * b, 25 * a, 25 * b)) g.fill(); }
     g.globalAlpha = 1;
   }
-  function heatColour(e) { var t = Math.min(1, Math.log10(1 + e) / Math.log10(51)); return "rgb(" + Math.round(253 - 88 * t) + "," + Math.round(246 - 196 * t) + "," + Math.round(228 - 197 * t) + ")"; }
-  // a key for the error map: swatches at 0, 1, 5, 20 and 50 px, bottom right
-  function heatKey(id) {
-    var cv = $(id), g = cv.getContext("2d"), W = cv.clientWidth, H = cv.clientHeight, vals = [0, 1, 5, 20, 50], sw = W < 500 ? 22 : 34, x0 = W - vals.length * sw - 14, y0 = H - 34;
-    g.fillStyle = "rgba(255,253,246,.92)"; g.strokeStyle = COL.line; g.lineWidth = 1.2; g.fillRect(x0 - 8, y0 - 20, vals.length * sw + 16, 48); g.strokeRect(x0 - 8, y0 - 20, vals.length * sw + 16, 48);
-    g.font = (W < 500 ? "10px " : "12px ") + HAND; g.textAlign = "center"; g.fillStyle = COL.soft; g.fillText("px off", x0 + vals.length * sw / 2, y0 - 7);
-    vals.forEach(function (v, i) { g.fillStyle = heatColour(v); g.fillRect(x0 + i * sw, y0, sw - 4, 12); g.strokeRect(x0 + i * sw, y0, sw - 4, 12); g.fillStyle = COL.ink; g.fillText(String(v), x0 + i * sw + (sw - 4) / 2, y0 + 25); });
+  function heatColour(e) { var t = Math.pow(Math.min(1, Math.log10(1 + e) / Math.log10(51)), 1.4); /* under 1 px stays near-white */ return "rgb(" + Math.round(253 - 88 * t) + "," + Math.round(246 - 196 * t) + "," + Math.round(228 - 197 * t) + ")"; }
+  // a key for the error map: a graded bar from 0 to 50 px (log scale, like the map), on a paper tag, bottom right
+  function heatKey(id, o) {
+    o = o || {};
+    var cv = $(id), g = cv.getContext("2d"), W = cv.clientWidth, H = cv.clientHeight, small = W < 480, bw = small ? 120 : 190, bh = small ? 9 : 12, fz = small ? 10.5 : 12;
+    var tw = bw + 20, th = bh + fz * 2 + 18, x0 = o.right ? W - tw - 10 : Math.round(W / 2 - tw / 2), y0 = H - th - 10;
+    g.fillStyle = "rgba(255,253,246,.94)"; g.strokeStyle = COL.line; g.lineWidth = 1.2; g.beginPath(); g.roundRect(x0, y0, tw, th, 4); g.fill(); g.stroke();
+    g.font = fz + "px " + HAND; g.textAlign = "left"; g.fillStyle = COL.soft; g.fillText(o.title || "px off, by the answer key", x0 + 10, y0 + fz + 3);
+    var bx = x0 + 10, by = y0 + fz + 9, n = 40;
+    for (var i = 0; i < n; i++) { var e = Math.pow(51, (i + 0.5) / n) - 1; g.fillStyle = heatColour(e); g.fillRect(bx + i * bw / n, by, bw / n + 0.6, bh); }
+    g.strokeStyle = COL.line; g.lineWidth = 1; g.strokeRect(bx, by, bw, bh);
+    g.fillStyle = COL.ink; g.textAlign = "center";
+    [0, 1, 2, 5, 10, 20, 50].forEach(function (v) { var x = bx + Math.log10(1 + v) / Math.log10(51) * bw; if (small && (v === 2 || v === 10)) return; g.beginPath(); g.moveTo(x, by + bh); g.lineTo(x, by + bh + 3); g.stroke(); g.fillText(String(v), x, by + bh + fz + 4); });
   }
   function heat(g, m, Wc, Hc) {
     var ny = m.grid.length, nx = m.grid[0].length, cw = Wc / nx, ch = Hc / ny;
@@ -220,45 +265,66 @@
   function axes(g, W, H, pad, xs, ylo, yhi, o) {
     var X = function (v) { return pad.l + (v - xs[0]) / (xs[1] - xs[0] || 1) * (W - pad.l - pad.r); };
     var Y = o.logy ? function (v) { return H - pad.b - (Math.log10(Math.max(v, 1e-30)) - ylo) / (yhi - ylo) * (H - pad.t - pad.b); } : function (v) { return H - pad.b - (v - ylo) / (yhi - ylo || 1) * (H - pad.t - pad.b); };
-    g.fillStyle = COL.sheet; g.fillRect(0, 0, W, H);
-    g.strokeStyle = COL.rule; g.lineWidth = 1; g.fillStyle = COL.soft; g.font = "13px " + HAND;
+    var small = W < 560, fz = small ? 12 : 13.5;
+    plotArea(g, W, H, pad);
+    g.strokeStyle = COL.rule; g.lineWidth = 1; g.fillStyle = COL.soft; g.font = fz + "px " + HAND;
     var ticks = o.yticks || (function () { var t = [], k; for (k = 0; k <= 4; k++) t.push(ylo + (yhi - ylo) * k / 4); return t; })();
     ticks.forEach(function (yv) { var yy = o.logy ? Y(Math.pow(10, yv)) : Y(yv); g.beginPath(); g.moveTo(pad.l, yy); g.lineTo(W - pad.r, yy); g.stroke(); g.textAlign = "right"; g.fillText(o.yfmt ? o.yfmt(yv) : minus(fmt(yv, Math.abs(yv - Math.round(yv)) > 1e-9 ? 1 : 0)), pad.l - 6, yy + 4); });
-    if (!o.logy && ylo < 0 && yhi > 0) { g.strokeStyle = COL.soft; g.beginPath(); g.moveTo(pad.l, Y(0)); g.lineTo(W - pad.r, Y(0)); g.stroke(); }
-    g.textAlign = "center"; (o.xticks || []).forEach(function (v) { g.fillText(o.xfmt ? o.xfmt(v) : String(v), X(v), H - pad.b + 16); });
-    if (o.xlab) g.fillText(o.xlab, (pad.l + W - pad.r) / 2, H - 3);
-    if (o.ylab) { g.save(); g.translate(12, (pad.t + H - pad.b) / 2); g.rotate(-Math.PI / 2); g.fillText(o.ylab, 0, 0); g.restore(); }
-    return { X: X, Y: Y };
+    if (!o.logy && ylo < 0 && yhi > 0) { g.strokeStyle = "rgba(74,46,30,.5)"; g.beginPath(); g.moveTo(pad.l, Y(0)); g.lineTo(W - pad.r, Y(0)); g.stroke(); }
+    plotAxes(g, W, H, pad);
+    g.fillStyle = COL.soft; g.textAlign = "center"; var xt = o.xticks || [];
+    xt.forEach(function (v, i) { if (small && xt.length > 6 && i % 2) return; g.fillText(o.xfmt ? o.xfmt(v) : String(v), X(v), H - pad.b + fz + 4); });
+    if (o.xlab) { var xl = o.xlab; if (g.measureText(xl).width > W - pad.l - pad.r - 8 && o.xlabS) xl = o.xlabS; g.fillText(xl, (pad.l + W - pad.r) / 2, H - 4); }
+    if (o.ylab) { g.save(); g.translate(13, (pad.t + H - pad.b) / 2); g.rotate(-Math.PI / 2); g.fillText(o.ylab, 0, 0); g.restore(); }
+    return { X: X, Y: Y, fz: fz, small: small };
   }
-  // A line chart. o: { xs: [min, max], xticks, ylo, yhi, logy, series: [{ name, col, pts: [[x, y]], dash, width, dots }] }
+  // A line chart. o: { xs: [min, max], xticks, ylo, yhi, logy, series: [{ name, col, pts: [[x, y]], dash, width, dots }], empty }
   function lineChart(id, o) {
-    var c = prep($(id)), g = c.g, W = c.W, H = c.H, pad = { l: 50, r: 14, t: 16, b: 36 };
-    var A = axes(g, W, H, pad, o.xs, o.ylo, o.yhi, o);
-    (o.vlines || []).forEach(function (v) { g.strokeStyle = v.col || COL.soft; g.setLineDash([3, 4]); g.lineWidth = 1.4; g.beginPath(); g.moveTo(A.X(v.x), pad.t); g.lineTo(A.X(v.x), H - pad.b); g.stroke(); g.setLineDash([]); if (v.label) { g.fillStyle = v.col || COL.soft; g.textAlign = v.align || "left"; g.fillText(v.label, A.X(v.x) + (v.align === "right" ? -4 : 4), pad.t + 12); } });
+    var c = prep($(id)), g = c.g, W = c.W, H = c.H, small = W < 560, pad = { l: small ? 42 : 52, r: 14, t: 16, b: small ? 34 : 38 };
+    var A = axes(g, W, H, pad, o.xs, o.ylo, o.yhi, o), fz = A.fz;
+    var clampY = function (y) { return Math.max(pad.t - 4, Math.min(H - pad.b + 4, y)); };
+    var live = o.series.filter(function (s) { return s.pts.some(function (p) { return p[1] != null && isFinite(p[1]); }); });
+    if (!live.length && o.empty) { emptyNote(g, W, H, pad, o.empty, fz + 2); return A; }
+    (o.vlines || []).forEach(function (v) { g.strokeStyle = v.col || COL.soft; g.setLineDash([3, 4]); g.lineWidth = 1.4; g.beginPath(); g.moveTo(A.X(v.x), pad.t); g.lineTo(A.X(v.x), H - pad.b); g.stroke(); g.setLineDash([]); if (v.label) { var al = v.align || (A.X(v.x) > (pad.l + W - pad.r) * 0.72 ? "right" : "left"); g.fillStyle = v.col || COL.soft; g.textAlign = al; g.font = fz + "px " + HAND; g.fillText(v.label, A.X(v.x) + (al === "right" ? -4 : 4), H - pad.b - 6); } });
     o.series.forEach(function (s) {
       g.strokeStyle = s.col; g.lineWidth = s.width || 2.5; g.setLineDash(s.dash || []);
       g.beginPath(); var started = false;
-      s.pts.forEach(function (p) { if (p[1] == null || !isFinite(p[1])) { started = false; return; } var x = A.X(p[0]), y = A.Y(p[1]); y = Math.max(pad.t - 4, Math.min(H - pad.b + 4, y)); if (started) g.lineTo(x, y); else { g.moveTo(x, y); started = true; } });
+      s.pts.forEach(function (p) { if (p[1] == null || !isFinite(p[1])) { started = false; return; } var x = A.X(p[0]), y = clampY(A.Y(p[1])); if (started) g.lineTo(x, y); else { g.moveTo(x, y); started = true; } });
       g.stroke(); g.setLineDash([]);
-      if (s.dots) s.pts.forEach(function (p) { if (p[1] == null || !isFinite(p[1])) return; g.fillStyle = s.col; g.beginPath(); g.arc(A.X(p[0]), Math.max(pad.t - 4, Math.min(H - pad.b + 4, A.Y(p[1]))), 3.5, 0, 7); g.fill(); });
+      if (s.dots) s.pts.forEach(function (p) { if (p[1] == null || !isFinite(p[1])) return; g.fillStyle = s.col; g.beginPath(); g.arc(A.X(p[0]), clampY(A.Y(p[1])), 3.5, 0, 7); g.fill(); });
     });
-    var lx = pad.l + 8, ly = pad.t + 6; g.textAlign = "left"; g.font = "13px " + HAND;
-    if (o.legendRight) { lx = W - pad.r - 8 - Math.max.apply(null, o.series.map(function (s) { return s.name ? g.measureText(s.name).width + 28 : 0; })); }
-    o.series.forEach(function (s) { if (!s.name) return; g.fillStyle = "rgba(255,253,246,.85)"; g.fillRect(lx - 3, ly - 4, g.measureText(s.name).width + 32, 16); g.strokeStyle = s.col; g.lineWidth = 2.5; g.setLineDash(s.dash || []); g.beginPath(); g.moveTo(lx, ly + 4); g.lineTo(lx + 20, ly + 4); g.stroke(); g.setLineDash([]); g.fillStyle = COL.ink; g.fillText(s.name, lx + 26, ly + 8); ly += 17; });
+    // the legend on a paper tag, in whichever top corner (or the top middle) the lines stay furthest from
+    var named = o.series.filter(function (s) { return s.name; }), nm = function (s) { return small && s.short ? s.short : s.name; };
+    if (named.length) {
+      g.font = fz + "px " + HAND; var lw = 0; named.forEach(function (s) { lw = Math.max(lw, g.measureText(nm(s)).width); });
+      var ly = pad.t + 6, lh = fz + 4, bw = lw + 40, bh = named.length * lh + 8;
+      var cands = [pad.l + 8, W - pad.r - bw - 8, (pad.l + W - pad.r - bw) / 2], best = 0, bestClear = -1;
+      if (o.legendRight) best = 1;
+      else cands.forEach(function (cx, ci) { var clear = 1e9; o.series.forEach(function (s) { s.pts.forEach(function (p) { if (p[1] == null || !isFinite(p[1])) return; var px = A.X(p[0]); if (px >= cx - 6 && px <= cx + bw + 6) clear = Math.min(clear, clampY(A.Y(p[1])) - (ly + bh)); }); }); if (clear > bestClear + 1) { bestClear = clear; best = ci; } });
+      var lx = cands[best];
+      g.fillStyle = "rgba(255,253,246,.94)"; g.strokeStyle = COL.line; g.lineWidth = 1.2; g.beginPath(); g.roundRect(lx, ly, bw, bh, 4); g.fill(); g.stroke();
+      g.textAlign = "left"; ly += 4 + lh / 2;
+      named.forEach(function (s) { g.strokeStyle = s.col; g.lineWidth = s.width || 2.5; g.setLineDash(s.dash || []); g.beginPath(); g.moveTo(lx + 8, ly); g.lineTo(lx + 28, ly); g.stroke(); g.setLineDash([]); if (s.dots) { g.fillStyle = s.col; g.beginPath(); g.arc(lx + 18, ly, 3, 0, 7); g.fill(); } g.fillStyle = COL.ink; g.fillText(nm(s), lx + 34, ly + fz * 0.35); ly += lh; });
+    }
     return A;
   }
-  // Singular values as bars on a log scale, relative to the largest.
+  // Singular values as bars on a log scale, relative to the largest. S = null with o.empty draws the empty state.
   function svBars(id, S, o) {
     o = o || {};
-    var c = prep($(id)), g = c.g, W = c.W, H = c.H, pad = { l: 50, r: 12, t: 14, b: 30 }, n = S.length, lo = o.lo || -16;
-    var A = axes(g, W, H, pad, [0, n], lo, 0, { logy: true, yticks: [lo, lo * 3 / 4, lo / 2, lo / 4, 0].map(Math.round), yfmt: function (v) { return v === 0 ? "1" : "10" + sup(v); } });
-    var bw = (W - pad.l - pad.r) / n;
+    var c = prep($(id)), g = c.g, W = c.W, H = c.H, small = W < 560, pad = { l: small ? 44 : 54, r: 12, t: 18, b: 30 }, n = S ? S.length : (o.n || 6), lo = o.lo || -16;
+    var A = axes(g, W, H, pad, [0, n], lo, 0, { logy: true, yticks: [lo, lo * 3 / 4, lo / 2, lo / 4, 0].map(Math.round), yfmt: function (v) { return v === 0 ? "1" : "10" + sup(v); }, ylab: small ? "" : "relative to σ₁" });
+    var bw = (W - pad.l - pad.r) / n, fz = A.fz;
+    g.font = fz + "px " + HAND; g.textAlign = "center";
+    for (var i = 0; i < n; i++) { g.fillStyle = COL.soft; g.fillText("σ" + sub(i + 1), pad.l + (i + 0.5) * bw, H - pad.b + fz + 4); }
+    if (!S) { if (o.empty) emptyNote(g, W, H, pad, o.empty, fz + 2); return; }
     S.forEach(function (s, i) {
-      var rel = Math.max(s / S[0], Math.pow(10, lo)), y = A.Y(rel), zero = s / S[0] < (o.zero || 1e-9);
+      var rel = Math.max(s / S[0], Math.pow(10, lo)), y = A.Y(rel), zero = s / S[0] < (o.zero || 1e-9), x0 = pad.l + i * bw + bw * 0.18, w = bw * 0.64;
       g.fillStyle = zero ? COL.err : (o.col || COL.model); g.strokeStyle = COL.line; g.lineWidth = 1.2;
-      g.fillRect(pad.l + i * bw + bw * 0.18, y, bw * 0.64, H - pad.b - y); g.strokeRect(pad.l + i * bw + bw * 0.18, y, bw * 0.64, H - pad.b - y);
-      g.fillStyle = COL.soft; g.textAlign = "center"; g.fillText("σ" + sub(i + 1), pad.l + (i + 0.5) * bw, H - pad.b + 15);
-      if (zero) { g.fillStyle = COL.err; g.fillText("≈ 0", pad.l + (i + 0.5) * bw, y - 4); }
+      g.fillRect(x0, y, w, H - pad.b - y); g.strokeRect(x0, y, w, H - pad.b - y);
+      // the small ones get their size written above them
+      var e = Math.log10(s / S[0]);
+      if (zero) { g.fillStyle = COL.err; g.font = "700 " + fz + "px " + SIGN; g.fillText("≈ 0", pad.l + (i + 0.5) * bw, y - 5); g.font = fz + "px " + HAND; }
+      else if (e < -1.5) { g.fillStyle = COL.ink; g.fillText("10" + sup(Math.round(e)), pad.l + (i + 0.5) * bw, y - 5); }
     });
   }
   function sup(v) { var m = { "-": "⁻", "0": "⁰", "1": "¹", "2": "²", "3": "³", "4": "⁴", "5": "⁵", "6": "⁶", "7": "⁷", "8": "⁸", "9": "⁹" }; return String(v).split("").map(function (ch) { return m[ch] || ch; }).join(""); }
@@ -342,12 +408,12 @@
       render(); touch("s1");
     }
     function render() {
-      if (!last) { drawFrame("s1c", { cam: EE.TRUE_PIN, pose: EE.makePose(S1PH[o.ph].spec, EE.TRUE_PIN), faint: true, marks: false, label: "press Find H" }); svBars("s1sv9", [1, 1, 1, 1, 1, 1, 1, 1, 1e-17]); return; }
+      if (!last) { drawFrame("s1c", { cam: EE.TRUE_PIN, pose: EE.makePose(S1PH[o.ph].spec, EE.TRUE_PIN), faint: true, marks: false, label: "1280 × 720 · lens dial at 0", hint: "press Find H to trace this photo" }); svBars("s1sv9", null, { n: 9, empty: "press Find H to see the nine singular values of L" }); return; }
       var L = last;
       drawFrame("s1c", { cam: EE.TRUE_PIN, pose: L.ph.pose, faint: true, seen: L.ph.pts, model: L.model, hlines: L.h.H, marks: false, label: "1280 × 720 · lens dial at 0" });
       $("s1rs").textContent = px(EE.transferRms(L.h.H, EE.PTS, L.ph.pts), 3);
       $("s1rt").textContent = px(EE.transferRms(L.h.H, EE.PTS, L.ph.ideal), 3);
-      $("s1cond").textContent = L.h.cond >= 1000 ? L.h.cond.toExponential(1).replace("e+", " × 10^") : fmt(L.h.cond, 2);
+      $("s1cond").textContent = L.h.cond >= 1000 ? L.h.cond.toExponential(1).replace(/e\+(\d+)/, function (m, e) { return " × 10" + sup(e); }) : fmt(L.h.cond, 2);
       $("s1L").textContent = EE.dltMatrix(EE.PTS, L.ph.pts).length;
       $("s1H").innerHTML = '<span class="ml">H found' + (o.norm ? " (normalised)" : "") + ", scaled so h₃₃ = 1</span>" + matHTML(L.h.H) + '<span class="ml">the true H = K[r1 r2 t]</span>' + matHTML(L.Ht);
       svBars("s1sv9", L.h.S, { zero: 1e-12, lo: -16 });
@@ -383,7 +449,7 @@
     function drawSweep() {
       var pts = sweep || [];
       var yhi = 1; pts.forEach(function (p) { yhi = Math.max(yhi, p[1].un.med); });
-      lineChart("s1chart", { xs: [0, 3000], xticks: [0, 500, 1000, 1500, 2000, 2500, 3000], xlab: "where the corners are numbered from (mm off the chart)", ylab: "median px off", ylo: -2, yhi: 1, logy: true, yticks: [-1, 0, 1], yfmt: function (v) { return v === 0 ? "1" : v < 0 ? "0.1" : "10"; },
+      lineChart("s1chart", { xs: [0, 3000], xticks: [0, 500, 1000, 1500, 2000, 2500, 3000], xlab: "where the corners are numbered from (mm off the chart)", xlabS: "origin offset (mm off the chart)", ylab: "median px off", ylo: -2, yhi: 1, logy: true, yticks: [-1, 0, 1], yfmt: function (v) { return v === 0 ? "1" : v < 0 ? "0.1" : "10"; }, empty: "press Sweep the offset: the median error at every origin, normalised and not",
         series: [{ name: "un-normalised", col: COL.err, dots: true, pts: pts.map(function (p) { return [p[0], p[1].un.med]; }) }, { name: "normalised (Hartley)", col: COL.truth, dots: true, pts: pts.map(function (p) { return [p[0], p[1].nz.med]; }) }] });
     }
     render(); drawSweep();
@@ -412,7 +478,7 @@
     function update() {
       qa(".tray button").forEach(function (b) { var on = sel.indexOf(+b.dataset.i) >= 0; b.classList.toggle("on", on); b.setAttribute("aria-pressed", on ? "true" : "false"); });
       $("s2n").textContent = sel.length;
-      if (!sel.length) { $("s2rows").textContent = 0; $("s2z").textContent = "–"; $("s2ok").textContent = "–"; $("s2card").innerHTML = '<div class="callout co-i">Put photos in the set to start counting.</div>'; svBars("s2sv", [1, 1, 1, 1, 1, 1].map(function () { return 1e-30; })); return; }
+      if (!sel.length) { $("s2rows").textContent = 0; $("s2z").textContent = "–"; $("s2ok").textContent = "–"; $("s2card").innerHTML = '<div class="callout co-i">Put photos in the set to start counting.</div>'; svBars("s2sv", null, { n: 6, empty: "put photos in the set to see the six singular values of V" }); return; }
       var z = EE.zhangClosed(sel.map(function (i) { return all[i]; }), { skewZero: o.skew });
       $("s2rows").textContent = z.rows; $("s2z").textContent = z.nullDim; $("s2z").className = "v " + (z.nullDim === 1 ? "good" : "bad");
       $("s2ok").textContent = z.ok ? "yes" : "no"; $("s2ok").className = "v " + (z.ok ? "good" : "bad");
@@ -440,7 +506,7 @@
     };
     function drawFlat() {
       var pts = flat || [];
-      lineChart("s2chart", { xs: [0, 50], xticks: [0, 10, 20, 30, 40, 50], xfmt: function (v) { return v + "°"; }, xlab: "how far each photo is tilted", ylab: "sessions of 200 that fail", ylo: 0, yhi: 200,
+      lineChart("s2chart", { xs: [0, 50], xticks: [0, 10, 20, 30, 40, 50], xfmt: function (v) { return v + "°"; }, xlab: "how far each photo is tilted", ylab: "sessions of 200 that fail", ylo: 0, yhi: 200, empty: "press Run 200 sessions at each tilt",
         series: [{ name: "no usable camera", col: COL.err, dots: true, pts: pts.map(function (a) { return [a.tilt, a.fail]; }) }] });
       $("s2tab").innerHTML = pts.length ? "<tr><th>tilt</th><th>sessions failed</th><th>|fx error| of the rest</th></tr>" + pts.map(function (a) { return "<tr><td>" + a.tilt + '°</td><td class="n">' + a.fail + " / 200</td><td>" + pct(a.ef / Math.max(1, a.ok), 2) + "</td></tr>"; }).join("") : "";
     }
@@ -464,25 +530,32 @@
       $("s3st").innerHTML = z.ok ? "Every chart's position comes out of K⁻¹H once K is known. " + (o.sigma === 0 ? "No noise: they sit exactly on the true ones." : "With noise, the blue charts drift off the green ones, most of all along the line of sight.") : "";
     };
     function drawTop() {
-      var c = prep($("s3top")), g = c.g, W = c.W, H = c.H;
+      var c = prep($("s3top")), g = c.g, W = c.W, H = c.H, small = W < 560, fz = small ? 12 : 13.5;
       g.fillStyle = COL.sheet; g.fillRect(0, 0, W, H);
-      var zmax = 900, xmax = 600, cx0 = W / 2, base = H - 26, kz = (H - 50) / zmax, kx = Math.min(kz, (W / 2 - 20) / xmax);
+      // the floor plan: the camera at the bottom looking up the page, distance rules every 200 mm
+      var zmax = 800; if (last) last.views.forEach(function (v) { zmax = Math.max(zmax, Math.ceil((v.pose.t[2] + 180) / 100) * 100); });
+      var xmax = Math.tan(31 * Math.PI / 180) * zmax + 60, cx0 = W / 2, base = H - 30, kz = (H - 52) / zmax, kx = Math.min(kz, (W / 2 - 16) / xmax);
       var P = function (x, z) { return [cx0 + x * kx, base - z * kz]; };
-      g.strokeStyle = COL.rule; g.lineWidth = 1; g.fillStyle = COL.soft; g.font = "12px " + HAND; g.textAlign = "left";
-      [300, 600, 900].forEach(function (z) { var p = P(-xmax, z), q = P(xmax, z); g.beginPath(); g.moveTo(p[0], p[1]); g.lineTo(q[0], q[1]); g.stroke(); g.fillText(z + " mm", 6, p[1] - 3); });
-      // the camera and its field of view (62° across)
       var a = 31 * Math.PI / 180, fl = P(-Math.tan(a) * zmax, zmax), fr = P(Math.tan(a) * zmax, zmax), c0 = P(0, 0);
-      g.strokeStyle = "rgba(31,122,122,.4)"; g.setLineDash([4, 4]); g.beginPath(); g.moveTo(fl[0], fl[1]); g.lineTo(c0[0], c0[1]); g.lineTo(fr[0], fr[1]); g.stroke(); g.setLineDash([]);
-      g.fillStyle = COL.shop; g.strokeStyle = COL.line; g.lineWidth = 2; g.beginPath(); g.roundRect ? g.roundRect(c0[0] - 14, c0[1] - 4, 28, 18, 4) : g.rect(c0[0] - 14, c0[1] - 4, 28, 18); g.fill(); g.stroke();
-      g.fillStyle = COL.soft; g.textAlign = "center"; g.fillText("the duck's camera", c0[0], H - 4);
-      if (!last) return;
-      function chart(pose, col, w) {
+      g.fillStyle = "rgba(205,235,230,.35)"; g.beginPath(); g.moveTo(c0[0], c0[1]); g.lineTo(fl[0], fl[1]); g.lineTo(fr[0], fr[1]); g.closePath(); g.fill();
+      g.strokeStyle = COL.rule; g.lineWidth = 1; g.fillStyle = COL.soft; g.font = fz + "px " + HAND; g.textAlign = "left";
+      for (var z = 200; z <= zmax; z += 200) { var p = P(-xmax, z), q = P(xmax, z); g.beginPath(); g.moveTo(p[0], p[1]); g.lineTo(q[0], q[1]); g.stroke(); g.fillText(z + " mm", 8, p[1] - 3); }
+      g.strokeStyle = "rgba(31,122,122,.55)"; g.setLineDash([4, 4]); g.lineWidth = 1.4; g.beginPath(); g.moveTo(fl[0], fl[1]); g.lineTo(c0[0], c0[1]); g.lineTo(fr[0], fr[1]); g.stroke(); g.setLineDash([]);
+      g.fillStyle = COL.shop; g.strokeStyle = COL.line; g.lineWidth = 2; g.beginPath(); g.roundRect(c0[0] - 15, c0[1] - 5, 30, 20, 4); g.fill(); g.stroke();
+      g.fillStyle = COL.mint; g.beginPath(); g.arc(c0[0], c0[1] - 2, 4, 0, 7); g.fill();
+      g.fillStyle = COL.soft; g.textAlign = "center"; g.fillText("the duck's camera, looking up the page · 62° across", c0[0], H - 6);
+      if (!small) { g.textAlign = "right"; g.fillText("seen from above", W - 10, fz + 6); }
+      if (!last) { tag(g, W / 2, H * 0.42, ["press Write the prescription to see where each chart was"], { center: true, fz: small ? 13 : 15, bold: true, col: COL.soft }); return; }
+      function chart(pose, col, fill, w) {
         var corners = [[-25, -25], [225, -25], [225, 150], [-25, 150]].map(function (m) { var X = EE.toCam(pose.R, pose.t, m[0], m[1]); return P(X[0], X[2]); });
         // seen from above, the chart's outline collapses to a band: draw its four corners joined
-        g.strokeStyle = col; g.lineWidth = w; g.beginPath(); corners.forEach(function (p, i) { if (i) g.lineTo(p[0], p[1]); else g.moveTo(p[0], p[1]); }); g.closePath(); g.stroke();
+        g.beginPath(); corners.forEach(function (p, i) { if (i) g.lineTo(p[0], p[1]); else g.moveTo(p[0], p[1]); }); g.closePath();
+        g.fillStyle = fill; g.fill(); g.strokeStyle = col; g.lineWidth = w; g.stroke();
       }
-      last.views.forEach(function (v) { chart(v.pose, COL.truth, 3.5); });
-      if (last.z.ok) last.z.poses.forEach(function (p) { chart(p, COL.model, 1.8); });
+      last.views.forEach(function (v) { chart(v.pose, COL.truth, "rgba(95,160,60,.28)", 3); });
+      if (last.z.ok) last.z.poses.forEach(function (p) { chart(p, COL.model, "rgba(36,106,156,.12)", 1.8); });
+      // which chart is which
+      last.views.forEach(function (v, i) { var X = EE.toCam(v.pose.R, v.pose.t, 100, 62.5), p = P(X[0], X[2]); g.fillStyle = COL.ink; g.font = "700 " + (fz - 1) + "px " + SIGN; g.textAlign = "center"; g.fillText(String(i + 1), p[0], p[1] - 10); });
     }
     $("s3sweep").onclick = function () {
       if (h) return; busy(["s3sweep"], true);
@@ -494,7 +567,7 @@
     function drawSweep() {
       var s = sweep || [];
       var s3 = s.filter(function (r) { return r.n >= 3; });
-      lineChart("s3chart", { xs: [3, 20], xticks: [3, 4, 6, 8, 12, 16, 20], xlab: "photos (2 photos, off the chart: 5.1% and 49 px)", ylab: "error", ylo: 0, yhi: 10, yticks: [0, 2, 4, 6, 8, 10], legendRight: true,
+      lineChart("s3chart", { xs: [3, 20], xticks: [3, 4, 6, 8, 12, 16, 20], xlab: "photos (2 photos, off the chart: 5.1% and 49 px)", xlabS: "photos (2: off the chart)", ylab: "error", ylo: 0, yhi: 10, yticks: [0, 2, 4, 6, 8, 10], empty: "press 20 sessions at each count",
         series: [{ name: "principal point, px", col: COL.err, dots: true, pts: s3.map(function (r) { return [r.n, r.ppErr]; }) }, { name: "|fx error|, %", col: COL.model, dots: true, pts: s3.map(function (r) { return [r.n, r.fxErr * 100]; }) }] });
       $("s3tab").innerHTML = s.length ? "<tr><th>photos</th><th>|fx error|</th><th>principal point off by</th></tr>" + s.map(function (r) { return "<tr><td>" + r.n + (r.n < 3 ? " (+ skew 0)" : "") + "</td><td>" + pct(r.fxErr, 2) + '</td><td class="n">' + px(r.ppErr, 1) + "</td></tr>"; }).join("") : "";
     }
@@ -517,7 +590,7 @@
       $("s4corner").textContent = q ? px(Math.hypot(q[0] - 1279, q[1]), 1) : "–";
       var rmax = Math.hypot(ray[0], ray[1]), pts = [];
       for (var r = 0; r <= 1.0001; r += 0.02) pts.push([r, r * (1 + o.k1 * r * r + o.k2 * r * r * r * r)]);
-      lineChart("s4curve", { xs: [0, 1], xticks: [0, 0.2, 0.4, 0.6, 0.8, 1], xfmt: function (v) { return fmt(v, 1); }, xlab: "pinhole radius r (in focal lengths)", ylab: "lens radius", ylo: 0, yhi: 1.2,
+      lineChart("s4curve", { xs: [0, 1], xticks: [0, 0.2, 0.4, 0.6, 0.8, 1], xfmt: function (v) { return fmt(v, 1); }, xlab: "pinhole radius r (in focal lengths)", xlabS: "pinhole radius r", ylab: "lens radius", ylo: 0, yhi: 1.2,
         vlines: [{ x: rmax, label: "frame corner", col: COL.soft }],
         series: [{ name: "no lens", col: COL.soft, dash: [5, 4], width: 1.6, pts: [[0, 0], [1, 1]] }, { name: "this dial", col: COL.lilac, pts: pts }] });
     }
@@ -530,7 +603,7 @@
     // the exam, lens-blind
     function resid(camE, poses, i) { var v = EXAM[i], model = EE.PTS.map(function (P) { return EE.project(camE, poses[i], P[0], P[1]); }); return { v: v, model: model }; }
     function exam() {
-      if (stage === 0) { drawFrame("s4res", { cam: EE.TRUE_LENS, pose: EXAM[SHOWN].pose, faint: true, seen: EXAM[SHOWN].pts, label: "exam photo " + (SHOWN + 1) + " of 12 · press a button" }); $("s4card").innerHTML = '<div class="callout co-i">The exam\'s 12 photos are ready. Run the closed form first.</div>'; return; }
+      if (stage === 0) { drawFrame("s4res", { cam: EE.TRUE_LENS, pose: EXAM[SHOWN].pose, faint: true, seen: EXAM[SHOWN].pts, label: "exam photo " + (SHOWN + 1) + " of 12 · corners as seen", hint: "press 1 · Closed form to grade this photo" }); $("s4card").innerHTML = '<div class="callout co-i">The exam\'s 12 photos are ready. Run the closed form first.</div>'; return; }
       var C = cal(), camE = stage === 1 ? C.closed.cam : C.linear.cam, rms = stage === 1 ? C.closedRms : C.linear.rms, R = resid(camE, C.closed.poses, SHOWN);
       rxCard("s4card", stage === 1 ? "Closed form, pretending the lens is a pinhole" : "… plus k1, k2 by linear least squares", camE, EE.TRUE_LENS, { sub: "12 photos through Microduck's lens · σ = 0.25 px", foot: "Reprojection RMS: <b>" + px(rms, 2) + "</b>, against about 0.35 px for a right card." });
       drawFrame("s4res", { cam: EE.TRUE_LENS, pose: EXAM[SHOWN].pose, faint: true, seen: R.v.pts, model: R.model, arrows: { from: R.v.pts, to: R.model, k: 5 }, label: "exam photo " + (SHOWN + 1) + " of 12 · errors × 5" });
@@ -561,7 +634,7 @@
       busy(["s5go", "s5step"], true);
       later(function () {
         var n = C().refined.hist.length; k = 0;
-        running = anim(Math.max(1800, n * 260), function (u) { var kk = Math.min(n - 1, Math.floor(u * n)); if (kk !== k) { k = kk; render(); } }, function () { running = null; k = -1; render(); busy(["s5go", "s5step"], false); $("s5st").innerHTML = "From RMS <b>" + px(C().refined.hist[0].rms, 2) + "</b> to <b>" + px(C().rms, 3) + "</b> in " + C().refined.iters + " steps. k1 is now " + minus(fmt(C().cam.k1, 3)) + " (the key: −0.347), fx is " + spct(EE.relErr(C().cam.fx, EE.TRUE_LENS.fx)) + " off, and the principal point is within " + px(Math.hypot(C().cam.cx - EE.TRUE_LENS.cx, C().cam.cy - EE.TRUE_LENS.cy), 1) + "."; touch("s5"); });
+        running = anim(Math.max(1800, n * 260), function (u) { var kk = Math.min(n - 1, Math.floor(u * n)); if (kk !== k) { k = kk; render(); } }, function () { running = null; k = -1; render(); busy(["s5go", "s5step"], false); $("s5st").innerHTML = "From RMS <b>" + px(C().refined.hist[0].rms, 2) + "</b> (step 4's card with its skew set to 0) to <b>" + px(C().rms, 3) + "</b> in " + C().refined.iters + " steps. k1 is now " + minus(fmt(C().cam.k1, 3)) + " (the key: −0.347), fx is " + spct(EE.relErr(C().cam.fx, EE.TRUE_LENS.fx)) + " off, and the principal point is within " + px(Math.hypot(C().cam.cx - EE.TRUE_LENS.cx, C().cam.cy - EE.TRUE_LENS.cy), 1) + "."; touch("s5"); });
         render();
       });
     };
@@ -620,7 +693,7 @@
       });
     };
     function drawHeat() {
-      if (!last || !last.e.ok) { drawFrame("s6heat", { marks: true, label: last ? "no prescription" : "book a session" }); return; }
+      if (!last || !last.e.ok) { drawFrame("s6heat", { marks: true, label: " ", hint: last ? "no prescription for this session" : "book a session to map where its card is off" }); return; }
       var dots = []; last.views.forEach(function (v) { v.pts.forEach(function (p) { dots.push(p); }); });
       drawFrame("s6heat", { heat: last.e.map, dots: dots, label: " " });
       heatKey("s6heat");
@@ -628,10 +701,10 @@
     var b = 0.5;
     $("s6b").addEventListener("input", function () { b = +this.value; $("s6bv").textContent = minus(fmt(b, 2)); drawTurn(); touch("s6"); });
     function drawTurn() {
-      var yours = YOURS || cal().cam, MODELS = [["centred pinhole, f 1065 (Duck's-Eye View)", EE.NOMINAL, COL.model], ["placeholder: 62° across 720", EE.PLACEHOLDER, COL.err], [YOURS ? "your session's card" : "the exam's card (step 5)", yours, COL.lilac]];
-      var series = MODELS.map(function (m) { var pts = []; for (var bb = -1; bb <= 1.0001; bb += 0.05) pts.push([bb, EE.bearingAngle(m[1], bb) - EE.bearingAngle(EE.TRUE_LENS, bb)]); return { name: m[0], col: m[2], pts: pts, width: m[1] === yours ? 3.2 : 2.4 }; });
-      lineChart("s6turnc", { xs: [-1, 1], xticks: [-1, -0.5, 0, 0.5, 1], xfmt: function (v) { return minus(fmt(v, 1)); }, xlab: "bearing b (−1 hard left · +1 hard right)", ylab: "head-turn error (°)", ylo: -20, yhi: 10, yticks: [-20, -15, -10, -5, 0, 5, 10], yfmt: function (v) { return minus(String(v)); },
-        vlines: [{ x: b, col: COL.ink }], series: series, legendRight: true });
+      var yours = YOURS || cal().cam, MODELS = [["centred pinhole, f 1065 (Duck's-Eye View)", EE.NOMINAL, COL.model, "centred pinhole, f 1065"], ["placeholder: 62° across 720", EE.PLACEHOLDER, COL.err, "placeholder, 62° / 720"], [YOURS ? "your session's card" : "the exam's card (step 5)", yours, COL.lilac, YOURS ? "your card" : "the exam's card"]];
+      var series = MODELS.map(function (m) { var pts = []; for (var bb = -1; bb <= 1.0001; bb += 0.05) pts.push([bb, EE.bearingAngle(m[1], bb) - EE.bearingAngle(EE.TRUE_LENS, bb)]); return { name: m[0], short: m[3], col: m[2], pts: pts, width: m[1] === yours ? 3.2 : 2.4 }; });
+      lineChart("s6turnc", { xs: [-1, 1], xticks: [-1, -0.5, 0, 0.5, 1], xfmt: function (v) { return minus(fmt(v, 1)); }, xlab: "bearing b (−1 hard left · +1 hard right)", xlabS: "bearing b (left −1 … +1 right)", ylab: "head-turn error (°)", ylo: -20, yhi: 10, yticks: [-20, -15, -10, -5, 0, 5, 10], yfmt: function (v) { return minus(String(v)); },
+        vlines: [{ x: b, col: COL.ink, label: "b = " + minus(fmt(b, 2)) }], series: series });
       var tr = EE.bearingAngle(EE.TRUE_LENS, b);
       $("s6ttab").innerHTML = "<tr><th>card, at b = " + minus(fmt(b, 2)) + "</th><th>turns the head</th><th>error</th><th>miss at 3 m</th></tr>" +
         "<tr><td>Microduck's own calibration (the key)</td><td class=\"n\">" + sgn(tr, 2) + "°</td><td>–</td><td>–</td></tr>" +

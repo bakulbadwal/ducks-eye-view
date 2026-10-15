@@ -6,6 +6,10 @@
 
 ![Eye Exam: a Busytown optician's shop, where a robot duck in the exam chair looks at a checkerboard eye chart held up by the optician](docs/hero.png)
 
+![One exam photo through Microduck's lens, graded by the lens-blind closed form: yellow dots are the corners as seen, blue rings where the pinhole card predicts them, and red arrows the reprojection error drawn five times longer](docs/drive.png)
+
+*Step 4: one exam photo graded by the closed form that ignores the lens. The red arrows are the reprojection error, drawn 5× longer; the lens pulled the outer corners in, and a pinhole has nowhere to put that bend but into a wrong K.*
+
 [Duck's-Eye View](https://bakulbadwal.github.io/ducks-eye-view/) turned a pixel into a head turn with the camera's intrinsics taken as given. This lab measures them. The robot is **Microduck**, a 25 cm open-source robot duck ([pollen-robotics/microduck](https://github.com/pollen-robotics/microduck)), and it goes to the optician. The **checkerboard** is the eye chart, each **photo** of it at a new angle is one view, the **tracing card** is a photo's homography, the **clue tally** is the two constraints each photo puts on K, the **prescription card** is K, the **lens dial** is the radial distortion model, and **"better one, or two?"** is Levenberg–Marquardt. Hold that picture and Zhang's paper, and the method inside OpenCV's `calibrateCamera`, read straight through.
 
 The camera every photo is drawn through is Microduck's own: the calibration its repo ships (solved on a real unit on 2026-09-08, 80 views, 0.79 px RMS), rounded and kept to Zhang's two radial terms. So every estimate on the page is shown against the truth.
@@ -41,7 +45,7 @@ I didn't find an interactive explainer that walks Zhang's method stage by stage 
 
 ## Run it
 
-Play it live at the link above, or open `index.html` in a browser. There's no build step, no dependencies, and nothing to install. `node tests/check.js` checks the math and prints every number in [`ACCEPTANCE.md`](ACCEPTANCE.md) (about 9 s).
+Play it live at the link above, or open `index.html` in a browser. There's no build step, no dependencies, and nothing to install. `node tests/check.js` checks the math and prints every number in [`ACCEPTANCE.md`](ACCEPTANCE.md) (about 8 s).
 
 ## What's exact and what's a model
 

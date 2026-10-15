@@ -328,7 +328,7 @@ HONESTY: the DLT, Hartley normalisation, Zhang's V b = 0 and App. B, the extrins
       <div class="tag">Guess first!</div>
       <div class="q">The corners were found with σ = 0.25 px of noise on each axis. After refinement, what's the best RMS you could hope for?</div>
       <div class="opts"><button>0.00 px, a perfect fit</button><button data-right>About 0.35 px</button><button>About 0.25 px</button></div>
-      <div class="why">The noise itself: σ√2 = 0.354 px per corner (two axes). The exam ends at <b>0.350 px</b>, a hair under, because 78 free numbers can soak up a little of the noise. An RMS far below the corner detector's noise means the model is fitting noise, not the lens.</div>
+      <div class="why">The noise itself: σ√2 = 0.354 px per corner (two axes). The exam ends at <b>0.350 px</b>, a hair under, as it should be: fitting 78 free numbers to 1,296 corner coordinates soaks up some of the noise (on average the floor drops to about σ√2·√(1 − 78/1296) ≈ 0.343 px). An RMS far below the corner detector's noise means the model is fitting noise, not the lens.</div>
     </div>
   </div>
   <div class="card">
@@ -374,6 +374,7 @@ HONESTY: the DLT, Hartley normalisation, Zhang's V b = 0 and App. B, the extrins
       <div class="stat"><div class="v" id="s6turn">–</div><div class="l">answer key: worst head-turn error</div></div>
     </div>
     <canvas id="s6heat" class="heat" aria-label="How many pixels off the calibration is, across the frame"></canvas>
+    <div class="legend"><span><span class="dot" style="background:#3A2418;opacity:.6"></span>a chart corner from the session</span><span><span class="x" style="color:#A5321F">+</span>the principal point (cx, cy)</span><span><span class="x" style="color:#6E5040">+</span>the frame's middle</span></div>
     <div class="chartcap" id="s6heatcap">Across the 1280 × 720 frame: how far the card puts a ray from where the true camera puts it. Pale is under 1 px; darker is worse. The dots are where the session's chart corners landed.</div>
     <div class="rx" id="s6card"></div>
     <div class="status" id="s6st"></div>

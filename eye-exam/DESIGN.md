@@ -30,6 +30,7 @@ Data colours are fixed on every canvas: a corner **as seen** is a yellow dot wit
 - **The top view** (step 3): the camera at the bottom, its 62° field dashed, and each chart's outline seen from above, true in green and recovered in blue.
 - **The error map** (step 6): the frame shaded by how many pixels the card is off, log scale with a key, and the session's corners dotted over it.
 - **Matrices** (`.mat`): 3 × 3 numbers between bracket rules, for H.
+- **Paper tags and rulers**: every canvas names itself on a small paper tag (bottom right), charts carry their legend on a tag placed where the lines stay clear of it, the camera frame has a pixel ruler along its top and left edges, and an idle widget says what to press in a tag in the middle instead of sitting blank.
 
 ## Scenes
 
