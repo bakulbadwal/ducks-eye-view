@@ -11,6 +11,7 @@ Five hands-on labs, one per Hugging Face course I'm working through. Each turns 
 - **[Finishing School](https://github.com/bakulbadwal/finishing-school)**: a smol course. Post-training: SFT, DPO and GRPO, with exact math and a capstone that picks one for three client briefs.
 - **[Wet Paint](https://github.com/bakulbadwal/arm-playground/tree/main/wet-paint)**: Robotics, after Unit 2, from the *Robot Learning* tutorial. Behaviour cloning, compounding error and DAgger, then executing action chunks in time: synchronous, ACT's temporal ensembling, SmolVLA's async queue and Real-Time Chunking.
 - **[Eye Exam](eye-exam/)**: this lab's sequel. Calibrating Microduck's camera with Zhang's method, with the robot's own calibration as the answer key.
+- **[Dual Controls](https://github.com/bakulbadwal/policy-pond/tree/main/dual-controls)**: Policy Pond's sequel. Reinforcement learning on real hardware with a human in the loop (HIL-SERL): replay buffer, soft actor-critic, a gamed reward classifier, demos and interventions.
 
 ---
 
