@@ -9,6 +9,9 @@ Five hands-on labs, one per Hugging Face course I'm working through. Each turns 
 - **[Duck's-Eye View](https://github.com/bakulbadwal/ducks-eye-view)**: Computer Vision Course. One camera frame through a real robot's vision stack, from the letterbox to YOLO's 2,100 boxes, INT8 and the pinhole camera.
 - **[Fork in the Road](https://github.com/bakulbadwal/fork-in-the-road)**: Diffusion Models Course. Why robots use diffusion to choose actions, with the real DDPM/DDIM math.
 - **[Finishing School](https://github.com/bakulbadwal/finishing-school)**: a smol course. Post-training: SFT, DPO and GRPO, with exact math and a capstone that picks one for three client briefs.
+- **[Demos to Deployment](https://github.com/bakulbadwal/arm-playground/tree/main/demos-to-deployment)**: Robotics, after Unit 2, from the *Robot Learning* tutorial. Behaviour cloning, compounding error and DAgger, then executing action chunks in time: synchronous, ACT's temporal ensembling, SmolVLA's async queue and Real-Time Chunking.
+- **[Eye Exam](eye-exam/)**: this lab's sequel. Calibrating Microduck's camera with Zhang's method, with the robot's own calibration as the answer key.
+- **[Dual Controls](https://github.com/bakulbadwal/policy-pond/tree/main/dual-controls)**: Policy Pond's sequel. Reinforcement learning on real hardware with a human in the loop (HIL-SERL): replay buffer, soft actor-critic, a gamed reward classifier, demos and interventions.
 
 ---
 
@@ -78,4 +81,4 @@ The honest version: these are local-first with no telemetry, so today I can't se
 
 - **More courses as they release:** Robotics Units 5–7 (reinforcement learning, imitation learning, foundation models) are still "coming soon" upstream.
 - **A series landing page** linking the labs in study order, with one shared progress view.
-- **Close the loop with the real robot:** the Duck's-Eye View bug board already mirrors Microduck's actual deployment bugs. The natural next lab is calibrating the robot's camera intrinsics, a real open TODO in its repo.
+- **Close the loop with the real robot:** the Duck's-Eye View bug board already mirrors Microduck's actual deployment bugs. The natural next lab was calibrating the robot's camera intrinsics. *Built 2026-10-15 as [Eye Exam](eye-exam/); by then Microduck had shipped its own calibration (648bf22), which the lab uses as its answer key, and which shows step 5's centred pinhole is about 6° off.*
