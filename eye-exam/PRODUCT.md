@@ -43,5 +43,5 @@ Used at a laptop in study sessions, and on a phone when shared. Steps are done i
 
 ## Brand commitments
 
-- Name: **Eye Exam**. A sibling of Inference Kitchen, Policy Pond, Fork in the Road, Duck's-Eye View and Wet Paint: same design system, an optician's teal masthead.
+- Name: **Eye Exam**. A sibling of Inference Kitchen, Policy Pond, Fork in the Road, Duck's-Eye View and Demos to Deployment: same design system, an optician's teal masthead.
 - Must not look like "every AI tool" (dark ground, neon accent, glowing cards) or a corporate SaaS dashboard.
